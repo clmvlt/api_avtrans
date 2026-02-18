@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="fr" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API AVTrans</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+        
+        .container {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            padding: 40px;
+            max-width: 800px;
+            width: 100%;
+        }
+        
+        h1 {
+            color: #333;
+            margin-bottom: 30px;
+            text-align: center;
+            font-size: 2.5em;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        
+        .info-section {
+            margin-bottom: 30px;
+        }
+        
+        .info-section h2 {
+            color: #555;
+            margin-bottom: 15px;
+            font-size: 1.3em;
+            border-bottom: 2px solid #667eea;
+            padding-bottom: 5px;
+        }
+        
+        .info-grid {
+            display: grid;
+            grid-template-columns: auto 1fr;
+            gap: 10px 20px;
+            margin-top: 15px;
+        }
+        
+        .info-label {
+            font-weight: 600;
+            color: #666;
+        }
+        
+        .info-value {
+            color: #333;
+        }
+        
+        .status {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.9em;
+            font-weight: 600;
+        }
+        
+        .status.connected {
+            background: #d4edda;
+            color: #155724;
+        }
+        
+        .status.disconnected {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        
+        .button-container {
+            text-align: center;
+            margin-top: 40px;
+        }
+        
+        .swagger-button {
+            display: inline-block;
+            padding: 15px 40px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            text-decoration: none;
+            border-radius: 50px;
+            font-size: 1.1em;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+        }
+        
+        .swagger-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(102, 126, 234, 0.5);
+        }
+        
+        .timestamp {
+            text-align: center;
+            color: #999;
+            font-size: 0.9em;
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid #eee;
+        }
+        
+        .endpoints {
+            margin-top: 20px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 10px;
+        }
+        
+        .endpoint-list {
+            list-style: none;
+            margin-top: 10px;
+        }
+        
+        .endpoint-list li {
+            padding: 8px 0;
+            border-bottom: 1px solid #dee2e6;
+        }
+        
+        .endpoint-list li:last-child {
+            border-bottom: none;
+        }
+        
+        .endpoint-list a {
+            color: #667eea;
+            text-decoration: none;
+            font-weight: 500;
+        }
+        
+        .endpoint-list a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 th:text="${applicationName}">API AVTrans</h1>
+        
+        <div class="info-section">
+            <h2>Informations de l'API</h2>
+            <div class="info-grid">
+                <span class="info-label">Nom:</span>
+                <span class="info-value" th:text="${applicationName}">apiavtrans</span>
+                
+                <span class="info-label">Adresse:</span>
+                <span class="info-value" th:text="${serverAddress + ':' + serverPort}">localhost:8080</span>
+                
+                <span class="info-label">Version Spring Boot:</span>
+                <span class="info-value" th:text="${springBootVersion}">3.4.0</span>
+                
+                <span class="info-label">Version Java:</span>
+                <span class="info-value" th:text="${javaVersion}">17</span>
+            </div>
+        </div>
+        
+        <div class="info-section">
+            <h2>Base de données</h2>
+            <div class="info-grid">
+                <span class="info-label">URL:</span>
+                <span class="info-value" th:text="${databaseUrl}">jdbc:postgresql://localhost:5432/avtrans</span>
+                
+                <span class="info-label">Statut:</span>
+                <span class="status" 
+                      th:classappend="${dbStatus == 'Connected'} ? 'connected' : 'disconnected'"
+                      th:text="${dbStatus}">Connected</span>
+                
+                <span class="info-label" th:if="${!#strings.isEmpty(dbProductName)}">Type:</span>
+                <span class="info-value" th:if="${!#strings.isEmpty(dbProductName)}" 
+                      th:text="${dbProductName}">PostgreSQL</span>
+                
+                <span class="info-label" th:if="${!#strings.isEmpty(dbProductVersion)}">Version:</span>
+                <span class="info-value" th:if="${!#strings.isEmpty(dbProductVersion)}" 
+                      th:text="${dbProductVersion}">14.0</span>
+            </div>
+        </div>
+        
+        <div class="endpoints">
+            <h2>Endpoints disponibles</h2>
+            <ul class="endpoint-list">
+                <li>
+                    <a href="/check" target="_blank">GET /check</a> - Vérifier l'état de l'API (JSON)
+                </li>
+                <li>
+                    <a href="/api-docs" target="_blank">GET /api-docs</a> - Documentation OpenAPI (JSON)
+                </li>
+                <li>
+                    <a href="/swagger-ui.html" target="_blank">GET /swagger-ui.html</a> - Interface Swagger UI
+                </li>
+            </ul>
+        </div>
+        
+        <div class="button-container">
+            <a href="/swagger-ui.html" class="swagger-button">
+                Accéder à Swagger UI
+            </a>
+        </div>
+        
+        <div class="timestamp">
+            <span>Page générée le </span>
+            <span th:text="${#temporals.format(timestamp, 'dd/MM/yyyy HH:mm:ss')}">01/01/2024 12:00:00</span>
+        </div>
+    </div>
+</body>
+</html>
