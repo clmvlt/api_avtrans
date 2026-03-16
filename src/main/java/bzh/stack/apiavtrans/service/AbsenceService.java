@@ -3,6 +3,7 @@ package bzh.stack.apiavtrans.service;
 import bzh.stack.apiavtrans.dto.absence.*;
 import bzh.stack.apiavtrans.dto.notification.NotificationCreateRequest;
 import bzh.stack.apiavtrans.entity.Absence;
+import bzh.stack.apiavtrans.entity.Absence.AbsencePeriod;
 import bzh.stack.apiavtrans.entity.Absence.AbsenceStatus;
 import bzh.stack.apiavtrans.entity.AbsenceType;
 import bzh.stack.apiavtrans.entity.User;
@@ -65,8 +66,10 @@ public class AbsenceService {
             return new AbsenceResponse(false, "La date de début doit être avant la date de fin", null);
         }
 
+        AbsencePeriod period = parsePeriod(request.getPeriod());
+
         List<Absence> overlapping = absenceRepository.findOverlappingAbsences(
-                user, request.getStartDate(), request.getEndDate());
+                user, request.getStartDate(), request.getEndDate(), period.name());
 
         if (!overlapping.isEmpty()) {
             return new AbsenceResponse(false, "Une absence existe déjà sur cette période", null);
@@ -77,6 +80,7 @@ public class AbsenceService {
         absence.setStartDate(request.getStartDate());
         absence.setEndDate(request.getEndDate());
         absence.setReason(request.getReason());
+        absence.setPeriod(period);
         absence.setStatus(AbsenceStatus.PENDING);
 
         if (request.getAbsenceTypeUuid() != null) {
@@ -91,11 +95,12 @@ public class AbsenceService {
         DateTimeFormatter dateFormatter = DateTimeFormatter.ofPattern("dd/MM/yyyy");
         String startDateStr = saved.getStartDate().format(dateFormatter);
         String endDateStr = saved.getEndDate().format(dateFormatter);
+        String periodLabel = getPeriodLabel(period);
 
         NotificationCreateRequest notificationRequest = new NotificationCreateRequest();
         notificationRequest.setTitle("Nouvelle demande d'absence");
-        notificationRequest.setDescription(String.format("%s %s a demandé une absence du %s au %s",
-            user.getFirstName(), user.getLastName(), startDateStr, endDateStr));
+        notificationRequest.setDescription(String.format("%s %s a demandé une absence du %s au %s%s",
+            user.getFirstName(), user.getLastName(), startDateStr, endDateStr, periodLabel));
         notificationRequest.setRefType("absence");
         notificationRequest.setRefId(saved.getUuid().toString());
 
@@ -325,8 +330,10 @@ public class AbsenceService {
             return new AbsenceResponse(false, "La date de début doit être avant la date de fin", null);
         }
 
+        AbsencePeriod period = parsePeriod(request.getPeriod());
+
         List<Absence> overlapping = absenceRepository.findOverlappingAbsences(
-                user, request.getStartDate(), request.getEndDate());
+                user, request.getStartDate(), request.getEndDate(), period.name());
 
         if (!overlapping.isEmpty()) {
             return new AbsenceResponse(false, "Une absence existe déjà sur cette période", null);
@@ -337,6 +344,7 @@ public class AbsenceService {
         absence.setStartDate(request.getStartDate());
         absence.setEndDate(request.getEndDate());
         absence.setReason(request.getReason());
+        absence.setPeriod(period);
 
         if (request.getAbsenceTypeUuid() != null) {
             AbsenceType absenceType = absenceTypeRepository.findById(request.getAbsenceTypeUuid())
@@ -356,5 +364,24 @@ public class AbsenceService {
         Absence saved = absenceRepository.save(absence);
 
         return new AbsenceResponse(true, "Absence créée avec succès", absenceMapper.toDTO(saved));
+    }
+
+    private AbsencePeriod parsePeriod(String period) {
+        if (period == null || period.isEmpty()) {
+            return AbsencePeriod.FULL_DAY;
+        }
+        try {
+            return AbsencePeriod.valueOf(period.toUpperCase());
+        } catch (IllegalArgumentException e) {
+            return AbsencePeriod.FULL_DAY;
+        }
+    }
+
+    private String getPeriodLabel(AbsencePeriod period) {
+        return switch (period) {
+            case MORNING -> " (matin)";
+            case AFTERNOON -> " (après-midi)";
+            default -> "";
+        };
     }
 }

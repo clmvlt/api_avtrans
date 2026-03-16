@@ -44,6 +44,10 @@ public class Absence {
     private String customType;
 
     @Enumerated(EnumType.STRING)
+    @Column(name = "period", nullable = false, columnDefinition = "varchar(20) default 'FULL_DAY'")
+    private AbsencePeriod period = AbsencePeriod.FULL_DAY;
+
+    @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 20)
     private AbsenceStatus status = AbsenceStatus.PENDING;
 
@@ -69,5 +73,11 @@ public class Absence {
         PENDING,
         APPROVED,
         REJECTED
+    }
+
+    public enum AbsencePeriod {
+        FULL_DAY,
+        MORNING,
+        AFTERNOON
     }
 }

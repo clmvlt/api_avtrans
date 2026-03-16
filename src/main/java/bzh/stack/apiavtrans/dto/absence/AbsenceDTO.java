@@ -20,6 +20,7 @@ public class AbsenceDTO {
     private String reason;
     private AbsenceTypeDTO absenceType;
     private String customType;
+    private String period;
     private String status;
     private UserDTO validatedBy;
     private ZonedDateTime validatedAt;

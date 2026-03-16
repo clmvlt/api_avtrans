@@ -28,5 +28,7 @@ public class AdminAbsenceCreateRequest {
 
     private String customType;
 
+    private String period;
+
     private Boolean approved;
 }

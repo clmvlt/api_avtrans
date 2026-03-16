@@ -23,7 +23,15 @@ public interface AbsenceRepository extends JpaRepository<Absence, UUID>, JpaSpec
     Page<Absence> findByUserOrderByStartDateDesc(User user, Pageable pageable);
 
     @Query("SELECT a FROM Absence a WHERE a.user = :user AND " +
-           "((a.startDate <= :endDate AND a.endDate >= :startDate))")
+           "a.startDate <= :endDate AND a.endDate >= :startDate AND " +
+           "(a.period = 'FULL_DAY' OR :period = 'FULL_DAY' OR a.period = :period)")
+    List<Absence> findOverlappingAbsences(@Param("user") User user,
+                                          @Param("startDate") LocalDate startDate,
+                                          @Param("endDate") LocalDate endDate,
+                                          @Param("period") String period);
+
+    @Query("SELECT a FROM Absence a WHERE a.user = :user AND " +
+           "a.startDate <= :endDate AND a.endDate >= :startDate")
     List<Absence> findOverlappingAbsences(@Param("user") User user,
                                           @Param("startDate") LocalDate startDate,
                                           @Param("endDate") LocalDate endDate);

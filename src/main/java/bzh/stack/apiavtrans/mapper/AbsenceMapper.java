@@ -28,6 +28,7 @@ public class AbsenceMapper {
         dto.setReason(absence.getReason());
         dto.setAbsenceType(absenceTypeMapper.toDTO(absence.getAbsenceType()));
         dto.setCustomType(absence.getCustomType());
+        dto.setPeriod(absence.getPeriod().name());
         dto.setStatus(absence.getStatus().name());
         dto.setValidatedBy(userMapper.toDTO(absence.getValidatedBy()));
         dto.setValidatedAt(absence.getValidatedAt());

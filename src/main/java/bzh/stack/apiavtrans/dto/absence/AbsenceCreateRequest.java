@@ -24,4 +24,6 @@ public class AbsenceCreateRequest {
     private UUID absenceTypeUuid;
 
     private String customType;
+
+    private String period;
 }
