@@ -1,6 +1,7 @@
 package bzh.stack.apiavtrans.mapper;
 
 import bzh.stack.apiavtrans.dto.auth.AuthUserDTO;
+import bzh.stack.apiavtrans.dto.common.AddressDTO;
 import bzh.stack.apiavtrans.dto.common.UserDTO;
 import bzh.stack.apiavtrans.dto.notification.NotificationPreferencesDTO;
 import bzh.stack.apiavtrans.entity.User;
@@ -41,6 +42,9 @@ public class UserMapper {
             dto.setPictureUrl(baseApiUrl + "/uploads/pictures/" + user.getPicturePath());
         }
         dto.setIsCouchette(user.getIsCouchette());
+        dto.setAddress(mapAddress(user));
+        dto.setDriverLicenseNumber(user.getDriverLicenseNumber());
+        dto.setHeureContrat(user.getHeureContrat());
         dto.setNotificationPreferences(mapNotificationPreferences(user));
 
         return dto;
@@ -69,9 +73,25 @@ public class UserMapper {
             dto.setPictureUrl(baseApiUrl + "/uploads/pictures/" + user.getPicturePath());
         }
         dto.setIsCouchette(user.getIsCouchette());
+        dto.setAddress(mapAddress(user));
+        dto.setDriverLicenseNumber(user.getDriverLicenseNumber());
+        dto.setHeureContrat(user.getHeureContrat());
         dto.setNotificationPreferences(mapNotificationPreferences(user));
 
         return dto;
+    }
+
+    private AddressDTO mapAddress(User user) {
+        if (user.getAddressStreet() == null && user.getAddressCity() == null
+                && user.getAddressPostalCode() == null && user.getAddressCountry() == null) {
+            return null;
+        }
+        return new AddressDTO(
+                user.getAddressStreet(),
+                user.getAddressCity(),
+                user.getAddressPostalCode(),
+                user.getAddressCountry()
+        );
     }
 
     private NotificationPreferencesDTO mapNotificationPreferences(User user) {
@@ -103,6 +123,14 @@ public class UserMapper {
         user.setUpdatedAt(dto.getUpdatedAt());
         user.setRole(roleMapper.toEntity(dto.getRole()));
         user.setIsCouchette(dto.getIsCouchette());
+        if (dto.getAddress() != null) {
+            user.setAddressStreet(dto.getAddress().getStreet());
+            user.setAddressCity(dto.getAddress().getCity());
+            user.setAddressPostalCode(dto.getAddress().getPostalCode());
+            user.setAddressCountry(dto.getAddress().getCountry());
+        }
+        user.setDriverLicenseNumber(dto.getDriverLicenseNumber());
+        user.setHeureContrat(dto.getHeureContrat());
 
         return user;
     }

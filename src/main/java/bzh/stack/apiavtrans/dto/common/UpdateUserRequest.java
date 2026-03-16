@@ -26,4 +26,13 @@ public class UpdateUserRequest {
 
     @Schema(description = "Indique si l'utilisateur a une couchette", example = "false")
     private Boolean isCouchette;
+
+    @Schema(description = "Adresse de l'utilisateur")
+    private AddressDTO address;
+
+    @Schema(description = "Numéro de permis de conduire", example = "12AB34567")
+    private String driverLicenseNumber;
+
+    @Schema(description = "Heures mensuelles du contrat de l'utilisateur", example = "151.67")
+    private Double heureContrat;
 }

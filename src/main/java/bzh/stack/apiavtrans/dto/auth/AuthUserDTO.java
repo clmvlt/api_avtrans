@@ -1,5 +1,6 @@
 package bzh.stack.apiavtrans.dto.auth;
 
+import bzh.stack.apiavtrans.dto.common.AddressDTO;
 import bzh.stack.apiavtrans.dto.common.RoleDTO;
 import bzh.stack.apiavtrans.dto.notification.NotificationPreferencesDTO;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -50,6 +51,15 @@ public class AuthUserDTO {
 
     @Schema(description = "Indicates if user has couchette", example = "false")
     private Boolean isCouchette;
+
+    @Schema(description = "User address")
+    private AddressDTO address;
+
+    @Schema(description = "Driver license number", example = "12AB34567")
+    private String driverLicenseNumber;
+
+    @Schema(description = "Heures mensuelles du contrat", example = "151.67")
+    private Double heureContrat;
 
     @Schema(description = "User notification preferences")
     private NotificationPreferencesDTO notificationPreferences;

@@ -1,10 +1,14 @@
 package bzh.stack.apiavtrans.service;
 
+import bzh.stack.apiavtrans.dto.common.AddressDTO;
+import bzh.stack.apiavtrans.dto.common.UserContractComparisonDTO;
 import bzh.stack.apiavtrans.dto.common.UserDTO;
+import bzh.stack.apiavtrans.dto.common.UserLastVehicleDTO;
 import bzh.stack.apiavtrans.dto.common.UserWithStatusDTO;
 import bzh.stack.apiavtrans.dto.common.UserHoursDTO;
 import bzh.stack.apiavtrans.dto.common.UserWithHoursDTO;
 import bzh.stack.apiavtrans.dto.common.UsersHoursListResponse;
+import bzh.stack.apiavtrans.entity.Absence;
 import bzh.stack.apiavtrans.dto.notification.UpdateNotificationPreferencesRequest;
 import bzh.stack.apiavtrans.dto.vehicule.UserLastKilometrageDTO;
 import bzh.stack.apiavtrans.entity.EmailVerification;
@@ -38,11 +42,15 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.DayOfWeek;
+import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
@@ -180,7 +188,7 @@ public class UserService {
      * Mettre à jour un utilisateur (admin)
      */
     @Transactional
-    public User updateUserAdmin(UUID uuid, String firstName, String lastName, Boolean isActive, UUID roleUuid, Boolean isCouchette) {
+    public User updateUserAdmin(UUID uuid, String firstName, String lastName, Boolean isActive, UUID roleUuid, Boolean isCouchette, AddressDTO address, String driverLicenseNumber, Double heureContrat) {
         User user = userRepository.findById(uuid)
                 .orElseThrow(() -> new RuntimeException("User not found with uuid: " + uuid));
 
@@ -200,6 +208,18 @@ public class UserService {
         }
         if (isCouchette != null) {
             user.setIsCouchette(isCouchette);
+        }
+        if (address != null) {
+            user.setAddressStreet(address.getStreet());
+            user.setAddressCity(address.getCity());
+            user.setAddressPostalCode(address.getPostalCode());
+            user.setAddressCountry(address.getCountry());
+        }
+        if (driverLicenseNumber != null) {
+            user.setDriverLicenseNumber(driverLicenseNumber);
+        }
+        if (heureContrat != null) {
+            user.setHeureContrat(heureContrat);
         }
 
         return userRepository.save(user);
@@ -418,6 +438,20 @@ public class UserService {
     }
 
     @Transactional(readOnly = true)
+    public List<UserLastVehicleDTO> getAllUsersLastVehicles() {
+        List<VehiculeKilometrage> latestKilometrages = vehiculeKilometrageRepository.findLatestByEachUser();
+
+        return latestKilometrages.stream()
+                .map(vk -> new UserLastVehicleDTO(
+                        vk.getUser().getUuid(),
+                        vk.getVehicule().getId(),
+                        vk.getVehicule().getImmat(),
+                        vk.getCreatedAt()
+                ))
+                .collect(java.util.stream.Collectors.toList());
+    }
+
+    @Transactional(readOnly = true)
     public UserLastKilometrageDTO getUserLastKilometrage(User user) {
         ZonedDateTime now = ZonedDateTime.now(ZoneId.of("Europe/Paris"));
         ZonedDateTime startOfDay = now.toLocalDate().atStartOfDay(ZoneId.of("Europe/Paris"));
@@ -450,6 +484,122 @@ public class UserService {
             user.setNotifPrefTodo(request.getTodo());
         }
         return userRepository.save(user);
+    }
+
+    /**
+     * Comparaison heures contrat vs heures effectuées pour tous les utilisateurs sur un mois donné.
+     */
+    @Transactional(readOnly = true)
+    public List<UserContractComparisonDTO> getAllUsersContractComparison(int year, int month) {
+        List<User> users = userRepository.findAllByOrderByLastNameAscFirstNameAsc();
+        List<UserContractComparisonDTO> result = new ArrayList<>();
+
+        for (User user : users) {
+            result.add(buildContractComparison(user, year, month));
+        }
+
+        return result;
+    }
+
+    /**
+     * Comparaison heures contrat vs heures effectuées pour un utilisateur sur un mois donné.
+     */
+    @Transactional(readOnly = true)
+    public UserContractComparisonDTO getUserContractComparison(UUID userUuid, int year, int month) {
+        User user = userRepository.findById(userUuid)
+                .orElseThrow(() -> new RuntimeException("Utilisateur non trouvé avec l'uuid: " + userUuid));
+        return buildContractComparison(user, year, month);
+    }
+
+    private UserContractComparisonDTO buildContractComparison(User user, int year, int month) {
+        ZoneId zone = ZoneId.of("Europe/Paris");
+        ZonedDateTime monthStart = ZonedDateTime.of(year, month, 1, 0, 0, 0, 0, zone);
+        ZonedDateTime monthEnd = monthStart.plusMonths(1).minusNanos(1);
+        ZonedDateTime now = ZonedDateTime.now(zone);
+        ZonedDateTime calculationEnd = monthEnd.isBefore(now) ? monthEnd : now;
+
+        // Heures travaillées
+        List<bzh.stack.apiavtrans.entity.Service> services =
+                serviceRepository.findByUserAndDebutBetween(user, monthStart, monthEnd);
+
+        long totalSeconds = 0;
+        Set<LocalDate> daysWorked = new HashSet<>();
+
+        for (bzh.stack.apiavtrans.entity.Service service : services) {
+            long duration = calculateServiceDuration(service, calculationEnd);
+            if (duration > 0) {
+                if (service.getIsBreak()) {
+                    totalSeconds -= duration;
+                } else {
+                    totalSeconds += duration;
+                    if (service.getDebut() != null) {
+                        daysWorked.add(service.getDebut().withZoneSameInstant(zone).toLocalDate());
+                    }
+                }
+            }
+        }
+
+        double heuresEffectuees = Math.round(totalSeconds / 3600.0 * 100.0) / 100.0;
+
+        // Jours ouvrés dans le mois
+        LocalDate firstDay = LocalDate.of(year, month, 1);
+        LocalDate lastDay = firstDay.plusMonths(1).minusDays(1);
+        int joursOuvres = 0;
+        for (LocalDate d = firstDay; !d.isAfter(lastDay); d = d.plusDays(1)) {
+            DayOfWeek dow = d.getDayOfWeek();
+            if (dow != DayOfWeek.SATURDAY && dow != DayOfWeek.SUNDAY) {
+                joursOuvres++;
+            }
+        }
+
+        // Absences approuvées
+        List<Absence> absences = absenceRepository.findApprovedByUserAndDateRange(user, firstDay, lastDay);
+        double joursAbsence = 0;
+        for (Absence absence : absences) {
+            LocalDate absStart = absence.getStartDate().isBefore(firstDay) ? firstDay : absence.getStartDate();
+            LocalDate absEnd = absence.getEndDate().isAfter(lastDay) ? lastDay : absence.getEndDate();
+            for (LocalDate d = absStart; !d.isAfter(absEnd); d = d.plusDays(1)) {
+                DayOfWeek dow = d.getDayOfWeek();
+                if (dow != DayOfWeek.SATURDAY && dow != DayOfWeek.SUNDAY) {
+                    if (absence.getPeriod() == Absence.AbsencePeriod.FULL_DAY) {
+                        joursAbsence += 1.0;
+                    } else {
+                        joursAbsence += 0.5;
+                    }
+                }
+            }
+        }
+
+        // Calculs de comparaison
+        Double heureContrat = user.getHeureContrat();
+        Double difference = null;
+        Double pourcentage = null;
+
+        if (heureContrat != null && heureContrat > 0) {
+            difference = Math.round((heuresEffectuees - heureContrat) * 100.0) / 100.0;
+            pourcentage = Math.round((heuresEffectuees / heureContrat) * 10000.0) / 100.0;
+        }
+
+        int joursTravailles = daysWorked.size();
+        Double moyenneParJour = joursTravailles > 0
+                ? Math.round((heuresEffectuees / joursTravailles) * 100.0) / 100.0
+                : 0.0;
+
+        UserDTO userDTO = userMapper.toDTO(user);
+
+        return new UserContractComparisonDTO(
+                userDTO,
+                year,
+                month,
+                heureContrat,
+                heuresEffectuees,
+                difference,
+                pourcentage,
+                joursAbsence,
+                joursOuvres,
+                joursTravailles,
+                moyenneParJour
+        );
     }
 
     /**

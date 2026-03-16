@@ -61,6 +61,24 @@ public class User {
     @Column(name = "is_couchette", nullable = false)
     private Boolean isCouchette = false;
 
+    @Column(name = "address_street", length = 255)
+    private String addressStreet;
+
+    @Column(name = "address_city", length = 100)
+    private String addressCity;
+
+    @Column(name = "address_postal_code", length = 20)
+    private String addressPostalCode;
+
+    @Column(name = "address_country", length = 100)
+    private String addressCountry;
+
+    @Column(name = "driver_license_number", length = 50)
+    private String driverLicenseNumber;
+
+    @Column(name = "heure_contrat")
+    private Double heureContrat;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "notif_pref_acompte")
     private NotificationPreference notifPrefAcompte = NotificationPreference.NONE;

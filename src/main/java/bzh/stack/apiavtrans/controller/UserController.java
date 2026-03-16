@@ -123,7 +123,10 @@ public class UserController {
                     request.getLastName(),
                     request.getIsActive(),
                     request.getRoleUuid(),
-                    request.getIsCouchette()
+                    request.getIsCouchette(),
+                    request.getAddress(),
+                    request.getDriverLicenseNumber(),
+                    request.getHeureContrat()
             );
 
             UserDTO userDTO = userMapper.toDTO(updatedUser);
@@ -199,6 +202,93 @@ public class UserController {
     public ResponseEntity<?> getAllUsersWithHours() {
         try {
             return ResponseEntity.ok(userService.getAllUsersWithHours());
+        } catch (RuntimeException e) {
+            return ResponseEntity.badRequest().body(new ErrorResponse(false, e.getMessage()));
+        }
+    }
+
+    @Operation(
+            summary = "[ADMINISTRATEUR] Comparaison heures contrat vs effectuées pour tous les utilisateurs",
+            description = "Retourne pour chaque utilisateur la comparaison entre ses heures de contrat et ses heures effectuées sur le mois donné. Par défaut : mois en cours."
+    )
+    @ApiResponse(
+            responseCode = "200",
+            description = "Comparaisons récupérées avec succès",
+            content = @Content(
+                    mediaType = "application/json",
+                    schema = @Schema(implementation = UsersContractComparisonListResponse.class)
+            )
+    )
+    @RequireRole("Administrateur")
+    @GetMapping("/contract-hours")
+    public ResponseEntity<?> getAllUsersContractComparison(
+            @Parameter(description = "Année (défaut: année en cours)") @RequestParam(required = false) Integer year,
+            @Parameter(description = "Mois 1-12 (défaut: mois en cours)") @RequestParam(required = false) Integer month) {
+        try {
+            java.time.ZonedDateTime now = java.time.ZonedDateTime.now(java.time.ZoneId.of("Europe/Paris"));
+            int y = year != null ? year : now.getYear();
+            int m = month != null ? month : now.getMonthValue();
+
+            var comparisons = userService.getAllUsersContractComparison(y, m);
+            return ResponseEntity.ok(new UsersContractComparisonListResponse(true,
+                    "Comparaisons contrat récupérées avec succès", y, m, comparisons));
+        } catch (RuntimeException e) {
+            return ResponseEntity.badRequest().body(new ErrorResponse(false, e.getMessage()));
+        }
+    }
+
+    @Operation(
+            summary = "[ADMINISTRATEUR] Comparaison heures contrat vs effectuées pour un utilisateur",
+            description = "Retourne la comparaison détaillée pour un utilisateur spécifique sur le mois donné."
+    )
+    @ApiResponses(value = {
+            @ApiResponse(
+                    responseCode = "200",
+                    description = "Comparaison récupérée avec succès",
+                    content = @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = UserContractComparisonResponse.class)
+                    )
+            ),
+            @ApiResponse(responseCode = "404", description = "Utilisateur non trouvé")
+    })
+    @RequireRole("Administrateur")
+    @GetMapping("/{uuid}/contract-hours")
+    public ResponseEntity<?> getUserContractComparison(
+            @Parameter(description = "User UUID", required = true) @PathVariable UUID uuid,
+            @Parameter(description = "Année (défaut: année en cours)") @RequestParam(required = false) Integer year,
+            @Parameter(description = "Mois 1-12 (défaut: mois en cours)") @RequestParam(required = false) Integer month) {
+        try {
+            java.time.ZonedDateTime now = java.time.ZonedDateTime.now(java.time.ZoneId.of("Europe/Paris"));
+            int y = year != null ? year : now.getYear();
+            int m = month != null ? month : now.getMonthValue();
+
+            var comparison = userService.getUserContractComparison(uuid, y, m);
+            return ResponseEntity.ok(new UserContractComparisonResponse(true,
+                    "Comparaison contrat récupérée avec succès", comparison));
+        } catch (RuntimeException e) {
+            return ResponseEntity.badRequest().body(new ErrorResponse(false, e.getMessage()));
+        }
+    }
+
+    @Operation(
+            summary = "[ADMINISTRATEUR] Get last vehicle used by each user",
+            description = "Returns an array with the last vehicle (from kilometrage entries) used by each user"
+    )
+    @ApiResponse(
+            responseCode = "200",
+            description = "Last vehicles retrieved successfully",
+            content = @Content(
+                    mediaType = "application/json",
+                    array = @ArraySchema(schema = @Schema(implementation = UserLastVehicleDTO.class))
+            )
+    )
+    @RequireRole("Administrateur")
+    @GetMapping("/last-vehicles")
+    public ResponseEntity<?> getAllUsersLastVehicles() {
+        try {
+            List<UserLastVehicleDTO> result = userService.getAllUsersLastVehicles();
+            return ResponseEntity.ok(result);
         } catch (RuntimeException e) {
             return ResponseEntity.badRequest().body(new ErrorResponse(false, e.getMessage()));
         }

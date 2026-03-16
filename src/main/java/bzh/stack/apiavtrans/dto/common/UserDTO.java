@@ -47,8 +47,17 @@ public class UserDTO {
     @Schema(description = "Whether user has a bunk bed", example = "false")
     private Boolean isCouchette;
 
+    @Schema(description = "User address")
+    private AddressDTO address;
+
+    @Schema(description = "Driver license number", example = "12AB34567")
+    private String driverLicenseNumber;
+
     @Schema(description = "Notification preferences")
     private NotificationPreferencesDTO notificationPreferences;
+
+    @Schema(description = "Heures mensuelles du contrat", example = "151.67")
+    private Double heureContrat;
 
     @Schema(description = "Presence status: PRESENT (active service), ON_BREAK (on break), ABSENT (no active service)",
             example = "PRESENT",

@@ -58,7 +58,9 @@ public class ProfileController {
                     updateRequest.getFirstName(),
                     updateRequest.getLastName(),
                     updateRequest.getEmail(),
-                    updateRequest.getPicture()
+                    updateRequest.getPicture(),
+                    updateRequest.getAddress(),
+                    updateRequest.getDriverLicenseNumber()
             );
 
             UserDTO userDTO = userMapper.toDTO(updatedUser);

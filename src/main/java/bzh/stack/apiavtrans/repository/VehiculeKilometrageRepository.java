@@ -34,4 +34,8 @@ public interface VehiculeKilometrageRepository extends JpaRepository<VehiculeKil
 
     @Query("SELECT COUNT(vk) > 0 FROM VehiculeKilometrage vk WHERE vk.user = :user AND vk.createdAt >= :startOfDay AND vk.createdAt < :endOfDay")
     boolean existsByUserAndCreatedAtBetween(@Param("user") User user, @Param("startOfDay") ZonedDateTime startOfDay, @Param("endOfDay") ZonedDateTime endOfDay);
+
+    @Query("SELECT vk FROM VehiculeKilometrage vk WHERE vk.user IS NOT NULL AND vk.createdAt = " +
+           "(SELECT MAX(vk2.createdAt) FROM VehiculeKilometrage vk2 WHERE vk2.user = vk.user)")
+    List<VehiculeKilometrage> findLatestByEachUser();
 }

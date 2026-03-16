@@ -1,5 +1,6 @@
 package bzh.stack.apiavtrans.service;
 
+import bzh.stack.apiavtrans.dto.common.AddressDTO;
 import bzh.stack.apiavtrans.entity.User;
 import bzh.stack.apiavtrans.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
@@ -87,7 +88,7 @@ public class ProfileService {
     }
 
     @Transactional
-    public User updateProfile(UUID userUuid, String firstName, String lastName, String email, String base64Picture) {
+    public User updateProfile(UUID userUuid, String firstName, String lastName, String email, String base64Picture, AddressDTO address, String driverLicenseNumber) {
         User user = userRepository.findById(userUuid)
                 .orElseThrow(() -> new RuntimeException("User not found with uuid: " + userUuid));
 
@@ -119,6 +120,15 @@ public class ProfileService {
                 String fileName = saveBase64Image(base64Picture, userUuid);
                 user.setPicturePath(fileName);
             }
+        }
+        if (address != null) {
+            user.setAddressStreet(address.getStreet());
+            user.setAddressCity(address.getCity());
+            user.setAddressPostalCode(address.getPostalCode());
+            user.setAddressCountry(address.getCountry());
+        }
+        if (driverLicenseNumber != null) {
+            user.setDriverLicenseNumber(driverLicenseNumber);
         }
 
         return userRepository.save(user);
