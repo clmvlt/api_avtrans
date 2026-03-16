@@ -3,6 +3,7 @@ package bzh.stack.apiavtrans.dto.carte;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
 
+import java.time.LocalDate;
 import java.util.UUID;
 
 @Data
@@ -20,6 +21,9 @@ public class CarteUpdateRequest {
 
     @Schema(description = "Card number", example = "4111111111111111")
     private String numero;
+
+    @Schema(description = "Card expiration date", example = "2026-12-31")
+    private LocalDate dateExpiration;
 
     @Schema(description = "User UUID who will own the card (set to null to remove user)")
     private UUID userUuid;

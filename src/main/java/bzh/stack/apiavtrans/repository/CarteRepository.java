@@ -6,6 +6,7 @@ import bzh.stack.apiavtrans.entity.User;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
+import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 
@@ -17,4 +18,5 @@ public interface CarteRepository extends JpaRepository<Carte, UUID> {
     List<Carte> findByTypeCarteOrderByCreatedAtDesc(TypeCarte typeCarte);
     List<Carte> findAllByOrderByCreatedAtDesc();
     void deleteByUser(User user);
+    List<Carte> findByDateExpirationBetween(LocalDate from, LocalDate to);
 }

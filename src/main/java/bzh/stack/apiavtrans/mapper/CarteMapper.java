@@ -23,6 +23,7 @@ public class CarteMapper {
         dto.setDescription(carte.getDescription());
         dto.setCode(carte.getCode());
         dto.setNumero(carte.getNumero());
+        dto.setDateExpiration(carte.getDateExpiration());
         dto.setCreatedAt(carte.getCreatedAt());
         dto.setUpdatedAt(carte.getUpdatedAt());
 

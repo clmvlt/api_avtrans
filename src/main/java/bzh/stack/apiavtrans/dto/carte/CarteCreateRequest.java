@@ -5,6 +5,7 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import lombok.Data;
 
+import java.time.LocalDate;
 import java.util.UUID;
 
 @Data
@@ -23,6 +24,9 @@ public class CarteCreateRequest {
 
     @Schema(description = "Card number", example = "4111111111111111")
     private String numero;
+
+    @Schema(description = "Card expiration date", example = "2026-12-31")
+    private LocalDate dateExpiration;
 
     @Schema(description = "User UUID who will own the card (optional)")
     private UUID userUuid;

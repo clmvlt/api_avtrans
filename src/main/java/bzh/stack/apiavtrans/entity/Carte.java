@@ -7,6 +7,7 @@ import lombok.NoArgsConstructor;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 
+import java.time.LocalDate;
 import java.time.ZonedDateTime;
 import java.util.UUID;
 
@@ -33,6 +34,9 @@ public class Carte {
 
     @Column(name = "numero", length = 50)
     private String numero;
+
+    @Column(name = "date_expiration")
+    private LocalDate dateExpiration;
 
     @ManyToOne
     @JoinColumn(name = "user_uuid")

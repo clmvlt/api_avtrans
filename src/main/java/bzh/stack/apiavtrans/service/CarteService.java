@@ -60,6 +60,7 @@ public class CarteService {
         carte.setDescription(request.getDescription());
         carte.setCode(request.getCode());
         carte.setNumero(request.getNumero());
+        carte.setDateExpiration(request.getDateExpiration());
         carte.setUser(user);
         carte.setTypeCarte(typeCarte);
 
@@ -82,6 +83,9 @@ public class CarteService {
         }
         if (request.getNumero() != null) {
             carte.setNumero(request.getNumero());
+        }
+        if (request.getDateExpiration() != null) {
+            carte.setDateExpiration(request.getDateExpiration());
         }
         if (Boolean.TRUE.equals(request.getClearUser())) {
             carte.setUser(null);

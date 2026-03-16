@@ -4,6 +4,7 @@ import bzh.stack.apiavtrans.dto.common.UserDTO;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
 
+import java.time.LocalDate;
 import java.time.ZonedDateTime;
 import java.util.UUID;
 
@@ -25,6 +26,9 @@ public class CarteDTO {
 
     @Schema(description = "Card number", example = "4111111111111111")
     private String numero;
+
+    @Schema(description = "Card expiration date", example = "2026-12-31")
+    private LocalDate dateExpiration;
 
     @Schema(description = "User UUID who owns the card")
     private UUID userUuid;
