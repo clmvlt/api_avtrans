@@ -7,6 +7,7 @@ import lombok.NoArgsConstructor;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 
+import java.math.BigDecimal;
 import java.time.ZonedDateTime;
 import java.util.UUID;
 
@@ -40,6 +41,9 @@ public class StockItem {
 
     @Column(name = "unite", length = 20)
     private String unite;
+
+    @Column(name = "prix_unitaire", precision = 10, scale = 2)
+    private BigDecimal prixUnitaire;
 
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false, columnDefinition = "TIMESTAMP WITH TIME ZONE")

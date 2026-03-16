@@ -6,6 +6,7 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.math.BigDecimal;
 import java.util.UUID;
 
 @Data
@@ -32,4 +33,8 @@ public class StockItemUpdateRequest {
 
     @Schema(description = "Unité de mesure", example = "pièce")
     private String unite;
+
+    @PositiveOrZero(message = "Le prix unitaire doit être positif ou nul")
+    @Schema(description = "Prix unitaire HT", example = "15.00")
+    private BigDecimal prixUnitaire;
 }

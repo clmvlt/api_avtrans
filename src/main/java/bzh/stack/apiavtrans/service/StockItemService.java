@@ -50,6 +50,7 @@ public class StockItemService {
         stockItem.setDescription(request.getDescription());
         stockItem.setQuantite(request.getQuantite());
         stockItem.setUnite(request.getUnite());
+        stockItem.setPrixUnitaire(request.getPrixUnitaire());
 
         if (request.getCategoryId() != null) {
             StockCategory category = stockCategoryRepository.findById(request.getCategoryId())
@@ -93,6 +94,10 @@ public class StockItemService {
 
         if (request.getUnite() != null) {
             stockItem.setUnite(request.getUnite());
+        }
+
+        if (request.getPrixUnitaire() != null) {
+            stockItem.setPrixUnitaire(request.getPrixUnitaire());
         }
 
         StockItem updated = stockItemRepository.save(stockItem);

@@ -5,6 +5,7 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.math.BigDecimal;
 import java.time.ZonedDateTime;
 import java.util.UUID;
 
@@ -34,6 +35,9 @@ public class StockItemDTO {
 
     @Schema(description = "Unité de mesure", example = "pièce")
     private String unite;
+
+    @Schema(description = "Prix unitaire HT", example = "12.50")
+    private BigDecimal prixUnitaire;
 
     @Schema(description = "Date de création")
     private ZonedDateTime createdAt;

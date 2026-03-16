@@ -24,6 +24,7 @@ public class StockItemMapper {
         dto.setQuantite(stockItem.getQuantite());
         dto.setCategory(stockCategoryMapper.toDTO(stockItem.getCategory()));
         dto.setUnite(stockItem.getUnite());
+        dto.setPrixUnitaire(stockItem.getPrixUnitaire());
         dto.setCreatedAt(stockItem.getCreatedAt());
         dto.setUpdatedAt(stockItem.getUpdatedAt());
 
