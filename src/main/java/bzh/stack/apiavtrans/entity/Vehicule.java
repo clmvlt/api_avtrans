@@ -6,6 +6,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 import org.hibernate.annotations.CreationTimestamp;
 
+import java.time.LocalDate;
 import java.time.ZonedDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -42,6 +43,33 @@ public class Vehicule {
     @Column(name = "picture_path", length = 500)
     private String picturePath;
 
+    @Column(name = "vin", length = 17)
+    private String vin;
+
+    @Column(name = "numero_carte_grise", length = 50)
+    private String numeroCarteGrise;
+
+    @Column(name = "date_mise_en_circulation")
+    private LocalDate dateMiseEnCirculation;
+
+    @Column(name = "type_carburant", length = 30)
+    private String typeCarburant;
+
+    @Column(name = "ptac")
+    private Integer ptac;
+
+    @Column(name = "numero_contrat_assurance", length = 100)
+    private String numeroContratAssurance;
+
+    @Column(name = "assureur", length = 100)
+    private String assureur;
+
+    @Column(name = "date_expiration_assurance")
+    private LocalDate dateExpirationAssurance;
+
+    @Column(name = "date_prochain_controle_technique")
+    private LocalDate dateProchainControleTechnique;
+
     @OneToMany(mappedBy = "vehicule", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<VehiculeAdjustInfo> adjustInfos = new ArrayList<>();
 
@@ -59,4 +87,7 @@ public class Vehicule {
 
     @OneToMany(mappedBy = "vehicule", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<RapportVehicule> rapports = new ArrayList<>();
+
+    @OneToMany(mappedBy = "vehicule", cascade = CascadeType.ALL, orphanRemoval = true)
+    private List<VehiculeEquipement> equipements = new ArrayList<>();
 }

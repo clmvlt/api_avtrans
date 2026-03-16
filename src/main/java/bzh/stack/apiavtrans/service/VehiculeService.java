@@ -68,6 +68,15 @@ public class VehiculeService {
         vehicule.setModel(request.getModel());
         vehicule.setBrand(request.getBrand());
         vehicule.setComment(request.getComment());
+        vehicule.setVin(request.getVin());
+        vehicule.setNumeroCarteGrise(request.getNumeroCarteGrise());
+        vehicule.setDateMiseEnCirculation(request.getDateMiseEnCirculation());
+        vehicule.setTypeCarburant(request.getTypeCarburant());
+        vehicule.setPtac(request.getPtac());
+        vehicule.setNumeroContratAssurance(request.getNumeroContratAssurance());
+        vehicule.setAssureur(request.getAssureur());
+        vehicule.setDateExpirationAssurance(request.getDateExpirationAssurance());
+        vehicule.setDateProchainControleTechnique(request.getDateProchainControleTechnique());
 
         Vehicule saved = vehiculeRepository.save(vehicule);
 
@@ -99,6 +108,15 @@ public class VehiculeService {
         vehicule.setModel(request.getModel());
         vehicule.setBrand(request.getBrand());
         vehicule.setComment(request.getComment());
+        vehicule.setVin(request.getVin());
+        vehicule.setNumeroCarteGrise(request.getNumeroCarteGrise());
+        vehicule.setDateMiseEnCirculation(request.getDateMiseEnCirculation());
+        vehicule.setTypeCarburant(request.getTypeCarburant());
+        vehicule.setPtac(request.getPtac());
+        vehicule.setNumeroContratAssurance(request.getNumeroContratAssurance());
+        vehicule.setAssureur(request.getAssureur());
+        vehicule.setDateExpirationAssurance(request.getDateExpirationAssurance());
+        vehicule.setDateProchainControleTechnique(request.getDateProchainControleTechnique());
 
         if (request.getPictureBase64() != null && !request.getPictureBase64().isEmpty()) {
             if (vehicule.getPicturePath() != null) {

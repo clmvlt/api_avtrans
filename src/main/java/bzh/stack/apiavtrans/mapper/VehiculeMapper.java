@@ -24,6 +24,15 @@ public class VehiculeMapper {
         dto.setModel(vehicule.getModel());
         dto.setBrand(vehicule.getBrand());
         dto.setComment(vehicule.getComment());
+        dto.setVin(vehicule.getVin());
+        dto.setNumeroCarteGrise(vehicule.getNumeroCarteGrise());
+        dto.setDateMiseEnCirculation(vehicule.getDateMiseEnCirculation());
+        dto.setTypeCarburant(vehicule.getTypeCarburant());
+        dto.setPtac(vehicule.getPtac());
+        dto.setNumeroContratAssurance(vehicule.getNumeroContratAssurance());
+        dto.setAssureur(vehicule.getAssureur());
+        dto.setDateExpirationAssurance(vehicule.getDateExpirationAssurance());
+        dto.setDateProchainControleTechnique(vehicule.getDateProchainControleTechnique());
 
         if (latestKm != null) {
             dto.setLatestKm(latestKm.getKm());
@@ -49,6 +58,15 @@ public class VehiculeMapper {
         vehicule.setModel(dto.getModel());
         vehicule.setBrand(dto.getBrand());
         vehicule.setComment(dto.getComment());
+        vehicule.setVin(dto.getVin());
+        vehicule.setNumeroCarteGrise(dto.getNumeroCarteGrise());
+        vehicule.setDateMiseEnCirculation(dto.getDateMiseEnCirculation());
+        vehicule.setTypeCarburant(dto.getTypeCarburant());
+        vehicule.setPtac(dto.getPtac());
+        vehicule.setNumeroContratAssurance(dto.getNumeroContratAssurance());
+        vehicule.setAssureur(dto.getAssureur());
+        vehicule.setDateExpirationAssurance(dto.getDateExpirationAssurance());
+        vehicule.setDateProchainControleTechnique(dto.getDateProchainControleTechnique());
 
         return vehicule;
     }
