@@ -1,6 +1,7 @@
 package bzh.stack.apiavtrans.repository;
 
 import bzh.stack.apiavtrans.entity.Absence;
+import bzh.stack.apiavtrans.entity.Absence.AbsencePeriod;
 import bzh.stack.apiavtrans.entity.AbsenceType;
 import bzh.stack.apiavtrans.entity.User;
 import org.springframework.data.domain.Page;
@@ -24,11 +25,11 @@ public interface AbsenceRepository extends JpaRepository<Absence, UUID>, JpaSpec
 
     @Query("SELECT a FROM Absence a WHERE a.user = :user AND " +
            "a.startDate <= :endDate AND a.endDate >= :startDate AND " +
-           "(a.period = 'FULL_DAY' OR :period = 'FULL_DAY' OR a.period = :period)")
+           "(a.period = bzh.stack.apiavtrans.entity.Absence$AbsencePeriod.FULL_DAY OR :period = bzh.stack.apiavtrans.entity.Absence$AbsencePeriod.FULL_DAY OR a.period = :period)")
     List<Absence> findOverlappingAbsences(@Param("user") User user,
                                           @Param("startDate") LocalDate startDate,
                                           @Param("endDate") LocalDate endDate,
-                                          @Param("period") String period);
+                                          @Param("period") AbsencePeriod period);
 
     @Query("SELECT a FROM Absence a WHERE a.user = :user AND " +
            "a.startDate <= :endDate AND a.endDate >= :startDate")
@@ -41,6 +42,12 @@ public interface AbsenceRepository extends JpaRepository<Absence, UUID>, JpaSpec
     List<Absence> findByUserUuidAndDateRange(@Param("userUuid") UUID userUuid,
                                               @Param("startDate") LocalDate startDate,
                                               @Param("endDate") LocalDate endDate);
+
+    @Query("SELECT a FROM Absence a WHERE a.user = :user AND a.status = 'APPROVED' AND " +
+           "a.startDate <= :endDate AND a.endDate >= :startDate")
+    List<Absence> findApprovedByUserAndDateRange(@Param("user") User user,
+                                                  @Param("startDate") LocalDate startDate,
+                                                  @Param("endDate") LocalDate endDate);
 
     List<Absence> findByAbsenceType(AbsenceType absenceType);
 

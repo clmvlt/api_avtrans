@@ -44,7 +44,7 @@ public class Absence {
     private String customType;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "period", nullable = false, columnDefinition = "varchar(20) default 'FULL_DAY'")
+    @Column(name = "period", nullable = false, length = 20)
     private AbsencePeriod period = AbsencePeriod.FULL_DAY;
 
     @Enumerated(EnumType.STRING)

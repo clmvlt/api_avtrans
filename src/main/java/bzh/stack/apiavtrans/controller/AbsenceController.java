@@ -129,6 +129,33 @@ public class AbsenceController {
         }
 
         @RequireRole("Administrateur")
+        @Operation(
+                summary = "[ADMINISTRATEUR] Update an absence request",
+                description = "Permet de modifier une absence uniquement si elle n'est pas approuvée (PENDING ou REJECTED). Si l'absence était REJECTED, elle repasse en PENDING après modification."
+        )
+        @ApiResponse(responseCode = "200", description = "Absence request updated successfully",
+                        content = @Content(schema = @Schema(implementation = AbsenceResponse.class)))
+        @ApiResponse(responseCode = "400", description = "Absence already approved or invalid data")
+        @ApiResponse(responseCode = "404", description = "Absence request not found")
+        @PutMapping("/admin/{uuid}")
+        public ResponseEntity<?> updateAbsenceByAdmin(
+                        @Parameter(description = "Absence UUID") @PathVariable UUID uuid,
+                        @Valid @RequestBody AdminAbsenceUpdateRequest request) {
+                try {
+                        AbsenceResponse response = absenceService.updateAbsenceByAdmin(uuid, request);
+
+                        if (!response.isSuccess()) {
+                                return ResponseEntity.badRequest()
+                                                .body(new ErrorResponse(false, response.getMessage()));
+                        }
+
+                        return ResponseEntity.ok(response);
+                } catch (RuntimeException e) {
+                        return ResponseEntity.badRequest().body(new ErrorResponse(false, e.getMessage()));
+                }
+        }
+
+        @RequireRole("Administrateur")
         @Operation(summary = "[ADMINISTRATEUR] Approve or reject an absence request")
         @ApiResponse(responseCode = "200", description = "Absence request validated successfully",
                         content = @Content(schema = @Schema(implementation = AbsenceResponse.class)))

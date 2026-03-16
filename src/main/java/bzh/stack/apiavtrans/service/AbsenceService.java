@@ -69,7 +69,7 @@ public class AbsenceService {
         AbsencePeriod period = parsePeriod(request.getPeriod());
 
         List<Absence> overlapping = absenceRepository.findOverlappingAbsences(
-                user, request.getStartDate(), request.getEndDate(), period.name());
+                user, request.getStartDate(), request.getEndDate(), period);
 
         if (!overlapping.isEmpty()) {
             return new AbsenceResponse(false, "Une absence existe déjà sur cette période", null);
@@ -333,7 +333,7 @@ public class AbsenceService {
         AbsencePeriod period = parsePeriod(request.getPeriod());
 
         List<Absence> overlapping = absenceRepository.findOverlappingAbsences(
-                user, request.getStartDate(), request.getEndDate(), period.name());
+                user, request.getStartDate(), request.getEndDate(), period);
 
         if (!overlapping.isEmpty()) {
             return new AbsenceResponse(false, "Une absence existe déjà sur cette période", null);
@@ -364,6 +364,62 @@ public class AbsenceService {
         Absence saved = absenceRepository.save(absence);
 
         return new AbsenceResponse(true, "Absence créée avec succès", absenceMapper.toDTO(saved));
+    }
+
+    @Transactional
+    public AbsenceResponse updateAbsenceByAdmin(UUID absenceUuid, AdminAbsenceUpdateRequest request) {
+        Absence absence = absenceRepository.findById(absenceUuid)
+                .orElseThrow(() -> new RuntimeException("Absence non trouvée"));
+
+        if (absence.getStatus() == AbsenceStatus.APPROVED) {
+            return new AbsenceResponse(false, "Impossible de modifier une absence déjà approuvée", absenceMapper.toDTO(absence));
+        }
+
+        LocalDate startDate = request.getStartDate() != null ? request.getStartDate() : absence.getStartDate();
+        LocalDate endDate = request.getEndDate() != null ? request.getEndDate() : absence.getEndDate();
+
+        if (startDate.isAfter(endDate)) {
+            return new AbsenceResponse(false, "La date de début doit être avant la date de fin", null);
+        }
+
+        AbsencePeriod period = request.getPeriod() != null ? parsePeriod(request.getPeriod()) : absence.getPeriod();
+
+        // Vérification chevauchement en excluant l'absence en cours de modification
+        List<Absence> overlapping = absenceRepository.findOverlappingAbsences(
+                absence.getUser(), startDate, endDate, period);
+        overlapping.removeIf(a -> a.getUuid().equals(absenceUuid));
+
+        if (!overlapping.isEmpty()) {
+            return new AbsenceResponse(false, "Une absence existe déjà sur cette période", null);
+        }
+
+        absence.setStartDate(startDate);
+        absence.setEndDate(endDate);
+        absence.setPeriod(period);
+
+        if (request.getReason() != null) {
+            absence.setReason(request.getReason());
+        }
+        if (request.getAbsenceTypeUuid() != null) {
+            AbsenceType absenceType = absenceTypeRepository.findById(request.getAbsenceTypeUuid())
+                    .orElseThrow(() -> new RuntimeException("Type d'absence non trouvé"));
+            absence.setAbsenceType(absenceType);
+        }
+        if (request.getCustomType() != null) {
+            absence.setCustomType(request.getCustomType());
+        }
+
+        // Réinitialiser le statut en PENDING si l'absence était REJECTED
+        if (absence.getStatus() == AbsenceStatus.REJECTED) {
+            absence.setStatus(AbsenceStatus.PENDING);
+            absence.setValidatedBy(null);
+            absence.setValidatedAt(null);
+            absence.setRejectionReason(null);
+        }
+
+        Absence saved = absenceRepository.save(absence);
+
+        return new AbsenceResponse(true, "Absence modifiée avec succès", absenceMapper.toDTO(saved));
     }
 
     private AbsencePeriod parsePeriod(String period) {
