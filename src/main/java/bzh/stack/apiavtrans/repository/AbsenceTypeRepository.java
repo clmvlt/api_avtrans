@@ -13,4 +13,6 @@ public interface AbsenceTypeRepository extends JpaRepository<AbsenceType, UUID> 
     Optional<AbsenceType> findByName(String name);
 
     boolean existsByName(String name);
+
+    Optional<AbsenceType> findFirstByNameIgnoreCaseAndColorIsNotNull(String name);
 }
