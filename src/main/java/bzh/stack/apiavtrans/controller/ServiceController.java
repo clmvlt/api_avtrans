@@ -500,6 +500,8 @@ public class ServiceController {
                     request.getFin(),
                     request.getLatitude(),
                     request.getLongitude(),
+                    request.getLatitudeEnd(),
+                    request.getLongitudeEnd(),
                     request.getIsBreak()
             );
 
@@ -536,6 +538,8 @@ public class ServiceController {
                     request.getFin(),
                     request.getLatitude(),
                     request.getLongitude(),
+                    request.getLatitudeEnd(),
+                    request.getLongitudeEnd(),
                     request.getIsBreak()
             );
 

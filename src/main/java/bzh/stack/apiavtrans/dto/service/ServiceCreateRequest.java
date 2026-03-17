@@ -16,5 +16,7 @@ public class ServiceCreateRequest {
     private ZonedDateTime fin;
     private Double latitude;
     private Double longitude;
+    private Double latitudeEnd;
+    private Double longitudeEnd;
     private Boolean isBreak;
 }

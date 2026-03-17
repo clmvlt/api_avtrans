@@ -18,6 +18,8 @@ public class ServiceDTO {
     private Boolean isBreak;
     private Double latitude;
     private Double longitude;
+    private Double latitudeEnd;
+    private Double longitudeEnd;
     private Boolean isAdmin;
     private UUID userUuid;
 }

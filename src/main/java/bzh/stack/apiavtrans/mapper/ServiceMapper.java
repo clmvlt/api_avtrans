@@ -31,6 +31,8 @@ public class ServiceMapper {
         dto.setIsBreak(service.getIsBreak());
         dto.setLatitude(service.getLatitude());
         dto.setLongitude(service.getLongitude());
+        dto.setLatitudeEnd(service.getLatitudeEnd());
+        dto.setLongitudeEnd(service.getLongitudeEnd());
         dto.setIsAdmin(service.getIsAdmin());
         dto.setUserUuid(service.getUser() != null ? service.getUser().getUuid() : null);
 
@@ -50,6 +52,8 @@ public class ServiceMapper {
         service.setIsBreak(dto.getIsBreak());
         service.setLatitude(dto.getLatitude());
         service.setLongitude(dto.getLongitude());
+        service.setLatitudeEnd(dto.getLatitudeEnd());
+        service.setLongitudeEnd(dto.getLongitudeEnd());
         service.setIsAdmin(dto.getIsAdmin());
 
         return service;

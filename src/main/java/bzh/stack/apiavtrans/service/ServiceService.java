@@ -74,10 +74,10 @@ public class ServiceService {
         service.setDuree(durationInSeconds);
 
         if (latitude != null) {
-            service.setLatitude(latitude);
+            service.setLatitudeEnd(latitude);
         }
         if (longitude != null) {
-            service.setLongitude(longitude);
+            service.setLongitudeEnd(longitude);
         }
 
         return serviceRepository.save(service);
@@ -123,10 +123,10 @@ public class ServiceService {
         breakService.setDuree(durationInSeconds);
 
         if (latitude != null) {
-            breakService.setLatitude(latitude);
+            breakService.setLatitudeEnd(latitude);
         }
         if (longitude != null) {
-            breakService.setLongitude(longitude);
+            breakService.setLongitudeEnd(longitude);
         }
 
         return serviceRepository.save(breakService);
@@ -323,7 +323,9 @@ public class ServiceService {
 
     @Transactional
     public Service createServiceForUser(UUID userUuid, ZonedDateTime debut, ZonedDateTime fin,
-                                       Double latitude, Double longitude, Boolean isBreak) {
+                                       Double latitude, Double longitude,
+                                       Double latitudeEnd, Double longitudeEnd,
+                                       Boolean isBreak) {
         User user = userRepository.findById(userUuid)
                 .orElseThrow(() -> new RuntimeException("User not found with uuid: " + userUuid));
 
@@ -332,6 +334,8 @@ public class ServiceService {
         service.setUser(user);
         service.setLatitude(latitude);
         service.setLongitude(longitude);
+        service.setLatitudeEnd(latitudeEnd);
+        service.setLongitudeEnd(longitudeEnd);
         service.setIsBreak(isBreak != null ? isBreak : false);
         service.setIsAdmin(true);
 
@@ -346,7 +350,9 @@ public class ServiceService {
 
     @Transactional
     public Service updateService(UUID serviceUuid, ZonedDateTime debut, ZonedDateTime fin,
-                                Double latitude, Double longitude, Boolean isBreak) {
+                                Double latitude, Double longitude,
+                                Double latitudeEnd, Double longitudeEnd,
+                                Boolean isBreak) {
         Service service = serviceRepository.findById(serviceUuid)
                 .orElseThrow(() -> new RuntimeException("Service not found"));
 
@@ -357,6 +363,8 @@ public class ServiceService {
         service.setFin(fin);
         service.setLatitude(latitude);
         service.setLongitude(longitude);
+        service.setLatitudeEnd(latitudeEnd);
+        service.setLongitudeEnd(longitudeEnd);
 
         if (isBreak != null) {
             service.setIsBreak(isBreak);

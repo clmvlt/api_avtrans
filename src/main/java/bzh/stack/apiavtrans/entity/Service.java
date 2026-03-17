@@ -38,6 +38,12 @@ public class Service {
     @Column(name = "longitude")
     private Double longitude;
 
+    @Column(name = "latitude_end")
+    private Double latitudeEnd;
+
+    @Column(name = "longitude_end")
+    private Double longitudeEnd;
+
     @Column(name = "is_admin", nullable = false)
     private Boolean isAdmin = false;
 
