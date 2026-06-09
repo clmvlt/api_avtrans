@@ -7,6 +7,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.time.ZonedDateTime;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -23,6 +24,8 @@ public interface SignatureRepository extends JpaRepository<Signature, UUID> {
 
     @Query("SELECT s FROM Signature s WHERE s.user = :user ORDER BY s.date DESC LIMIT 1")
     Optional<Signature> findLatestByUser(@Param("user") User user);
+
+    List<Signature> findByUserAndDateBetweenOrderByDateDesc(User user, ZonedDateTime start, ZonedDateTime end);
 
     void deleteByUser(User user);
 }

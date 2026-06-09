@@ -1,7 +1,9 @@
 package bzh.stack.apiavtrans.service;
 
+import bzh.stack.apiavtrans.entity.Signature;
 import bzh.stack.apiavtrans.entity.User;
 import bzh.stack.apiavtrans.repository.ServiceRepository;
+import bzh.stack.apiavtrans.repository.SignatureRepository;
 import bzh.stack.apiavtrans.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.apache.poi.ss.usermodel.*;
@@ -11,10 +13,13 @@ import org.apache.poi.xssf.usermodel.XSSFFormulaEvaluator;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
+import java.time.YearMonth;
 import java.time.format.DateTimeFormatter;
+import java.time.format.TextStyle;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
 
@@ -24,13 +29,19 @@ public class ExportService {
 
     private final ServiceRepository serviceRepository;
     private final UserRepository userRepository;
+    private final SignatureRepository signatureRepository;
     private static final ZoneId PARIS_ZONE = ZoneId.of("Europe/Paris");
+
+    private static final String[] COLUMN_HEADERS = {
+            "Date", "D\u00e9but journ\u00e9e", "D\u00e9but pause", "Fin pause",
+            "Fin journ\u00e9e", "Heures travaill\u00e9es", "Informations compl\u00e9mentaires", "Autres pauses"
+    };
 
     public byte[] exportWorkedHoursToExcel(List<UUID> userUuids, LocalDate startDate, LocalDate endDate) throws IOException {
         List<User> users = userRepository.findAllById(userUuids);
 
         if (users.isEmpty()) {
-            throw new RuntimeException("Aucun utilisateur trouvé");
+            throw new RuntimeException("Aucun utilisateur trouv\u00e9");
         }
 
         XSSFWorkbook workbook = new XSSFWorkbook();
@@ -39,10 +50,7 @@ public class ExportService {
             createUserSheet(workbook, user, startDate, endDate);
         }
 
-        // Évaluer toutes les formules pour qu'elles s'affichent immédiatement
         XSSFFormulaEvaluator.evaluateAllFormulaCells(workbook);
-
-        // Forcer le recalcul des formules à l'ouverture
         workbook.setForceFormulaRecalculation(true);
 
         ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
@@ -56,8 +64,10 @@ public class ExportService {
         String sheetName = sanitizeSheetName(user.getFirstName() + "_" + user.getLastName());
         Sheet sheet = workbook.createSheet(sheetName);
 
-        CellStyle headerStyle = createHeaderStyle(workbook);
+        // ── Styles ──
         CellStyle titleStyle = createTitleStyle(workbook);
+        CellStyle subtitleStyle = createSubtitleStyle(workbook);
+        CellStyle columnHeaderStyle = createHeaderStyle(workbook);
         CellStyle dataStyle = createDataStyle(workbook);
         CellStyle timeStyle = createTimeStyle(workbook);
         CellStyle greyedStyle = createGreyedStyle(workbook);
@@ -65,25 +75,32 @@ public class ExportService {
         CellStyle excelGreyedTimeStyle = createExcelGreyedTimeStyle(workbook);
         CellStyle numberStyle = createNumberStyle(workbook);
         CellStyle greyedNumberStyle = createGreyedNumberStyle(workbook);
+        CellStyle weekendDataStyle = createWeekendDataStyle(workbook);
+        CellStyle weekendExcelTimeStyle = createWeekendExcelTimeStyle(workbook);
+        CellStyle weekendNumberStyle = createWeekendNumberStyle(workbook);
+        CellStyle monthHeaderStyle = createMonthHeaderStyle(workbook);
+        CellStyle signatureBarStyle = createSignatureBarStyle(workbook);
+        CellStyle signatureLabelStyle = createSignatureLabelStyle(workbook);
+        CellStyle totalLabelStyle = createTotalLabelStyle(workbook);
+        CellStyle totalValueStyle = createTotalValueStyle(workbook);
 
         int rowNum = 0;
+        DateTimeFormatter periodFmt = DateTimeFormatter.ofPattern("dd/MM/yyyy");
 
+        // ── Titre + sous-titre ──
         Row titleRow = sheet.createRow(rowNum++);
         Cell titleCell = titleRow.createCell(0);
-        titleCell.setCellValue("Heures de " + user.getFirstName() + " " + user.getLastName());
+        titleCell.setCellValue(user.getFirstName() + " " + user.getLastName());
         titleCell.setCellStyle(titleStyle);
         sheet.addMergedRegion(new CellRangeAddress(0, 0, 0, 7));
 
-        rowNum++;
+        Row subtitleRow = sheet.createRow(rowNum++);
+        Cell subtitleCell = subtitleRow.createCell(0);
+        subtitleCell.setCellValue("P\u00e9riode du " + startDate.format(periodFmt) + " au " + endDate.format(periodFmt));
+        subtitleCell.setCellStyle(subtitleStyle);
+        sheet.addMergedRegion(new CellRangeAddress(1, 1, 0, 7));
 
-        Row headerRow = sheet.createRow(rowNum++);
-        String[] headers = {"Date", "Début journée", "Début pause", "Fin pause", "Fin journée", "Heures travaillées", "Informations complémentaires", "Autres pauses"};
-        for (int i = 0; i < headers.length; i++) {
-            Cell cell = headerRow.createCell(i);
-            cell.setCellValue(headers[i]);
-            cell.setCellStyle(headerStyle);
-        }
-
+        // ── Traitement des services ──
         ZonedDateTime startDateTime = startDate.atStartOfDay(PARIS_ZONE);
         ZonedDateTime endDateTime = endDate.plusDays(1).atStartOfDay(PARIS_ZONE);
 
@@ -160,23 +177,56 @@ public class ExportService {
             }
         }
 
+        // ── Rendu Excel ──
         LocalDate currentDate = startDate;
         DateTimeFormatter dateFormatter = DateTimeFormatter.ofPattern("dd/MM/yyyy");
         DateTimeFormatter timeFormatter = DateTimeFormatter.ofPattern("HH:mm:ss");
 
+        YearMonth currentMonth = YearMonth.from(startDate);
+        int monthStartExcelRow = -1;
+
+        // Premier mois : en-t\u00eate + colonnes
+        rowNum = writeSectionHeader(sheet, rowNum, "Heures \u2014 ", currentMonth, monthHeaderStyle);
+        rowNum = writeColumnHeaders(sheet, rowNum, columnHeaderStyle);
+
         while (!currentDate.isAfter(endDate)) {
+            YearMonth dayMonth = YearMonth.from(currentDate);
+
+            if (!dayMonth.equals(currentMonth)) {
+                // Cl\u00f4ture du mois pr\u00e9c\u00e9dent : total + signature
+                rowNum = writeTotalRow(sheet, rowNum, monthStartExcelRow, totalLabelStyle, totalValueStyle);
+                rowNum = writeSignatureSection(sheet, workbook, user, currentMonth, rowNum,
+                        signatureBarStyle, signatureLabelStyle, dataStyle);
+                currentMonth = dayMonth;
+                monthStartExcelRow = -1;
+                // Nouveau mois
+                rowNum = writeSectionHeader(sheet, rowNum, "Heures \u2014 ", currentMonth, monthHeaderStyle);
+                rowNum = writeColumnHeaders(sheet, rowNum, columnHeaderStyle);
+            }
+
+            boolean isWeekend = currentDate.getDayOfWeek() == DayOfWeek.SATURDAY
+                             || currentDate.getDayOfWeek() == DayOfWeek.SUNDAY;
+
             Row row = sheet.createRow(rowNum++);
+            if (monthStartExcelRow == -1) {
+                monthStartExcelRow = rowNum; // Excel row = rowNum apr\u00e8s post-incr\u00e9ment
+            }
+
             DayData dayData = dayDataMap.get(currentDate);
+
+            CellStyle currentDataStyle = isWeekend ? weekendDataStyle : dataStyle;
+            CellStyle currentExcelTime = isWeekend ? weekendExcelTimeStyle : excelTimeStyle;
+            CellStyle currentNumber = isWeekend ? weekendNumberStyle : numberStyle;
 
             Cell dateCell = row.createCell(0);
             dateCell.setCellValue(currentDate.format(dateFormatter));
-            dateCell.setCellStyle(dataStyle);
+            dateCell.setCellStyle(currentDataStyle);
 
             if (dayData == null) {
                 for (int i = 1; i < 8; i++) {
                     Cell cell = row.createCell(i);
                     cell.setCellValue("");
-                    cell.setCellStyle(dataStyle);
+                    cell.setCellStyle(currentDataStyle);
                 }
             } else if (dayData.isMultiDayService) {
                 for (int i = 1; i <= 7; i++) {
@@ -189,10 +239,11 @@ public class ExportService {
                     cell.setCellStyle(greyedStyle);
                 }
             } else {
-                CellStyle cellStyleToUse = (dayData.isMultiDayStart || dayData.isMultiDayEnd) ? greyedStyle : timeStyle;
-                CellStyle dataCellStyleToUse = (dayData.isMultiDayStart || dayData.isMultiDayEnd) ? greyedStyle : dataStyle;
-                CellStyle excelTimeStyleToUse = (dayData.isMultiDayStart || dayData.isMultiDayEnd) ? excelGreyedTimeStyle : excelTimeStyle;
-                CellStyle numberStyleToUse = (dayData.isMultiDayStart || dayData.isMultiDayEnd) ? greyedNumberStyle : numberStyle;
+                boolean isMultiDay = dayData.isMultiDayStart || dayData.isMultiDayEnd;
+                CellStyle cellStyleToUse = isMultiDay ? greyedStyle : (isWeekend ? weekendDataStyle : timeStyle);
+                CellStyle dataCellStyleToUse = isMultiDay ? greyedStyle : currentDataStyle;
+                CellStyle excelTimeStyleToUse = isMultiDay ? excelGreyedTimeStyle : currentExcelTime;
+                CellStyle numberStyleToUse = isMultiDay ? greyedNumberStyle : currentNumber;
 
                 Cell startCell = row.createCell(1);
                 if (dayData.workStart != null) {
@@ -208,7 +259,6 @@ public class ExportService {
 
                 BreakPeriod longestBreak = null;
                 if (!dayData.breaks.isEmpty()) {
-                    // Trouver la pause la plus longue
                     longestBreak = dayData.breaks.get(0);
                     long longestDuration = ChronoUnit.MINUTES.between(longestBreak.start, longestBreak.end);
 
@@ -242,7 +292,6 @@ public class ExportService {
 
                 Cell hoursCell = row.createCell(5);
                 if (dayData.workStart != null && dayData.workEnd != null) {
-                    // Formule Excel: ROUND((Fin - Début - (Fin pause - Début pause) - autres pauses) * 24, 2)
                     String formula = buildHoursFormula(rowNum, dayData, longestBreak);
                     hoursCell.setCellFormula(formula);
                 }
@@ -250,12 +299,12 @@ public class ExportService {
 
                 Cell infoCell = row.createCell(6);
                 if (dayData.isMultiDayStart || dayData.isMultiDayEnd) {
-                    infoCell.setCellValue("Service s'étend sur plusieurs jours");
+                    infoCell.setCellValue("Service s'\u00e9tend sur plusieurs jours");
                 } else if (dayData.isNightShift && dayData.nightShiftEndDate != null) {
                     String endDateStr = dayData.nightShiftEndDate.format(dateFormatter);
                     infoCell.setCellValue("Fin de service le " + endDateStr);
                 } else if (dayData.hasIncomplete) {
-                    infoCell.setCellValue("Pointage présent mais incomplet.");
+                    infoCell.setCellValue("Pointage pr\u00e9sent mais incomplet.");
                 }
                 infoCell.setCellStyle(dataCellStyleToUse);
 
@@ -290,22 +339,186 @@ public class ExportService {
             currentDate = currentDate.plusDays(1);
         }
 
-        for (int i = 0; i < headers.length; i++) {
+        // Cl\u00f4ture du dernier mois
+        rowNum = writeTotalRow(sheet, rowNum, monthStartExcelRow, totalLabelStyle, totalValueStyle);
+        rowNum = writeSignatureSection(sheet, workbook, user, currentMonth, rowNum,
+                signatureBarStyle, signatureLabelStyle, dataStyle);
+
+        // Auto-size
+        for (int i = 0; i < COLUMN_HEADERS.length; i++) {
             sheet.autoSizeColumn(i);
             sheet.setColumnWidth(i, sheet.getColumnWidth(i) + 500);
         }
     }
 
+    // ── Helpers de rendu ──
+
+    private int writeColumnHeaders(Sheet sheet, int rowNum, CellStyle style) {
+        Row row = sheet.createRow(rowNum);
+        for (int i = 0; i < COLUMN_HEADERS.length; i++) {
+            Cell cell = row.createCell(i);
+            cell.setCellValue(COLUMN_HEADERS[i]);
+            cell.setCellStyle(style);
+        }
+        return rowNum + 1;
+    }
+
+    private int writeSectionHeader(Sheet sheet, int rowNum, String prefix, YearMonth month, CellStyle style) {
+        String monthName = month.getMonth().getDisplayName(TextStyle.FULL, Locale.FRENCH);
+        String capitalizedMonth = monthName.substring(0, 1).toUpperCase() + monthName.substring(1);
+        String text = prefix + capitalizedMonth + " " + month.getYear();
+
+        Row row = sheet.createRow(rowNum);
+        Cell cell = row.createCell(0);
+        cell.setCellValue(text);
+        cell.setCellStyle(style);
+        for (int i = 1; i < 8; i++) {
+            row.createCell(i).setCellStyle(style);
+        }
+        sheet.addMergedRegion(new CellRangeAddress(rowNum, rowNum, 0, 7));
+        return rowNum + 1;
+    }
+
+    private int writeTotalRow(Sheet sheet, int rowNum, int monthStartExcelRow,
+                              CellStyle labelStyle, CellStyle valueStyle) {
+        int lastDataExcelRow = rowNum;
+        Row row = sheet.createRow(rowNum);
+
+        Cell label = row.createCell(0);
+        label.setCellValue("Total");
+        label.setCellStyle(labelStyle);
+        for (int i = 1; i < 5; i++) {
+            row.createCell(i).setCellStyle(labelStyle);
+        }
+        sheet.addMergedRegion(new CellRangeAddress(rowNum, rowNum, 0, 4));
+
+        Cell value = row.createCell(5);
+        if (monthStartExcelRow > 0) {
+            value.setCellFormula("SUM(F" + monthStartExcelRow + ":F" + lastDataExcelRow + ")");
+        }
+        value.setCellStyle(valueStyle);
+
+        for (int i = 6; i < 8; i++) {
+            row.createCell(i).setCellStyle(labelStyle);
+        }
+
+        return rowNum + 1;
+    }
+
+    private int writeSignatureSection(Sheet sheet, Workbook workbook, User user, YearMonth month,
+                                       int rowNum, CellStyle barStyle,
+                                       CellStyle labelStyle, CellStyle dataStyle) {
+        YearMonth signatureMonth = month.plusMonths(1);
+        ZonedDateTime sigStart = signatureMonth.atDay(1).atStartOfDay(PARIS_ZONE);
+        ZonedDateTime sigEnd = signatureMonth.atEndOfMonth().atTime(23, 59, 59).atZone(PARIS_ZONE);
+
+        List<Signature> signatures = signatureRepository.findByUserAndDateBetweenOrderByDateDesc(
+                user, sigStart, sigEnd);
+
+        rowNum = writeSectionHeader(sheet, rowNum, "Signature \u2014 ", month, barStyle);
+
+        if (!signatures.isEmpty()) {
+            Signature sig = signatures.get(0);
+            DateTimeFormatter sigFmt = DateTimeFormatter.ofPattern("dd/MM/yyyy '\u00e0' HH:mm");
+            String signedDate = sig.getDate().withZoneSameInstant(PARIS_ZONE).format(sigFmt);
+            String signedBy = user.getFirstName() + " " + user.getLastName();
+
+            Row infoRow = sheet.createRow(rowNum);
+
+            Cell signerLabel = infoRow.createCell(0);
+            signerLabel.setCellValue("Sign\u00e9 par :");
+            signerLabel.setCellStyle(labelStyle);
+
+            Cell signerValue = infoRow.createCell(1);
+            signerValue.setCellValue(signedBy);
+            signerValue.setCellStyle(dataStyle);
+
+            Cell dateLabel = infoRow.createCell(2);
+            dateLabel.setCellValue("Le :");
+            dateLabel.setCellStyle(labelStyle);
+
+            Cell dateValue = infoRow.createCell(3);
+            dateValue.setCellValue(signedDate);
+            dateValue.setCellStyle(dataStyle);
+
+            Cell hoursLabel = infoRow.createCell(4);
+            hoursLabel.setCellValue("Heures :");
+            hoursLabel.setCellStyle(labelStyle);
+
+            Cell hoursValue = infoRow.createCell(5);
+            hoursValue.setCellValue(sig.getHeuresSignees() + " h");
+            hoursValue.setCellStyle(dataStyle);
+
+            Cell statusLabel = infoRow.createCell(6);
+            statusLabel.setCellValue("Statut :");
+            statusLabel.setCellStyle(labelStyle);
+
+            Cell statusValue = infoRow.createCell(7);
+            statusValue.setCellValue("Sign\u00e9");
+            statusValue.setCellStyle(dataStyle);
+
+            rowNum++;
+
+            // Image coll\u00e9e \u00e0 droite (colonnes F-H)
+            try {
+                String base64 = sig.getSignatureBase64();
+                int imageType = Workbook.PICTURE_TYPE_PNG;
+
+                if (base64.startsWith("data:")) {
+                    String prefix = base64.substring(0, base64.indexOf(","));
+                    if (prefix.contains("jpeg") || prefix.contains("jpg")) {
+                        imageType = Workbook.PICTURE_TYPE_JPEG;
+                    }
+                    base64 = base64.substring(base64.indexOf(",") + 1);
+                }
+
+                byte[] imageBytes = Base64.getDecoder().decode(base64);
+                int pictureIdx = workbook.addPicture(imageBytes, imageType);
+
+                Drawing<?> drawing = sheet.createDrawingPatriarch();
+                CreationHelper helper = workbook.getCreationHelper();
+                ClientAnchor anchor = helper.createClientAnchor();
+                anchor.setCol1(5);
+                anchor.setRow1(rowNum);
+                anchor.setCol2(8);
+                anchor.setRow2(rowNum + 3);
+                anchor.setAnchorType(ClientAnchor.AnchorType.MOVE_AND_RESIZE);
+                drawing.createPicture(anchor, pictureIdx);
+
+                for (int i = 0; i < 3; i++) {
+                    sheet.createRow(rowNum + i);
+                }
+                rowNum += 3;
+            } catch (Exception e) {
+                Row errorRow = sheet.createRow(rowNum++);
+                Cell errorCell = errorRow.createCell(0);
+                errorCell.setCellValue("(Image de signature non disponible)");
+                errorCell.setCellStyle(dataStyle);
+            }
+        } else {
+            Row notSignedRow = sheet.createRow(rowNum);
+            Cell notSignedCell = notSignedRow.createCell(0);
+            notSignedCell.setCellValue("Non sign\u00e9 pour ce mois");
+            notSignedCell.setCellStyle(dataStyle);
+            for (int i = 1; i < 8; i++) {
+                notSignedRow.createCell(i).setCellStyle(dataStyle);
+            }
+            sheet.addMergedRegion(new CellRangeAddress(rowNum, rowNum, 0, 7));
+            rowNum++;
+        }
+
+        return rowNum;
+    }
+
+    // ── Formules ──
+
     private String buildHoursFormula(int excelRow, DayData dayData, BreakPeriod longestBreak) {
-        // Colonnes: B=Début, C=Début pause, D=Fin pause, E=Fin
         String formula = "ROUND(((E" + excelRow + "-B" + excelRow + ")";
 
-        // Soustraire la pause principale si elle existe
         if (longestBreak != null) {
             formula += "-(D" + excelRow + "-C" + excelRow + ")";
         }
 
-        // Soustraire les autres pauses (calculées en minutes puis converties en jours)
         if (dayData.breaks.size() > 1) {
             long otherBreaksMinutes = 0;
 
@@ -317,7 +530,6 @@ public class ExportService {
             }
 
             if (otherBreaksMinutes > 0) {
-                // Convertir les minutes en fraction de jour (minutes / (24*60))
                 double otherBreaksDays = otherBreaksMinutes / 1440.0;
                 formula += "-" + String.format(Locale.US, "%.10f", otherBreaksDays);
             }
@@ -327,11 +539,35 @@ public class ExportService {
         return formula;
     }
 
+    // ── Styles ──
+
+    private CellStyle createTitleStyle(Workbook workbook) {
+        CellStyle style = workbook.createCellStyle();
+        Font font = workbook.createFont();
+        font.setBold(true);
+        font.setFontHeightInPoints((short) 16);
+        style.setFont(font);
+        style.setAlignment(HorizontalAlignment.LEFT);
+        style.setVerticalAlignment(VerticalAlignment.CENTER);
+        return style;
+    }
+
+    private CellStyle createSubtitleStyle(Workbook workbook) {
+        CellStyle style = workbook.createCellStyle();
+        Font font = workbook.createFont();
+        font.setFontHeightInPoints((short) 11);
+        font.setColor(IndexedColors.GREY_50_PERCENT.getIndex());
+        style.setFont(font);
+        style.setAlignment(HorizontalAlignment.LEFT);
+        style.setVerticalAlignment(VerticalAlignment.CENTER);
+        return style;
+    }
+
     private CellStyle createHeaderStyle(Workbook workbook) {
         CellStyle style = workbook.createCellStyle();
         Font font = workbook.createFont();
         font.setBold(true);
-        font.setFontHeightInPoints((short) 11);
+        font.setFontHeightInPoints((short) 10);
         style.setFont(font);
         style.setAlignment(HorizontalAlignment.CENTER);
         style.setVerticalAlignment(VerticalAlignment.CENTER);
@@ -341,17 +577,6 @@ public class ExportService {
         style.setBorderRight(BorderStyle.THIN);
         style.setFillForegroundColor(IndexedColors.GREY_25_PERCENT.getIndex());
         style.setFillPattern(FillPatternType.SOLID_FOREGROUND);
-        return style;
-    }
-
-    private CellStyle createTitleStyle(Workbook workbook) {
-        CellStyle style = workbook.createCellStyle();
-        Font font = workbook.createFont();
-        font.setBold(true);
-        font.setFontHeightInPoints((short) 14);
-        style.setFont(font);
-        style.setAlignment(HorizontalAlignment.LEFT);
-        style.setVerticalAlignment(VerticalAlignment.CENTER);
         return style;
     }
 
@@ -437,6 +662,135 @@ public class ExportService {
         return style;
     }
 
+    private CellStyle createWeekendDataStyle(Workbook workbook) {
+        CellStyle style = workbook.createCellStyle();
+        style.setAlignment(HorizontalAlignment.CENTER);
+        style.setVerticalAlignment(VerticalAlignment.CENTER);
+        style.setBorderBottom(BorderStyle.THIN);
+        style.setBorderTop(BorderStyle.THIN);
+        style.setBorderLeft(BorderStyle.THIN);
+        style.setBorderRight(BorderStyle.THIN);
+        style.setFillForegroundColor(IndexedColors.PALE_BLUE.getIndex());
+        style.setFillPattern(FillPatternType.SOLID_FOREGROUND);
+        return style;
+    }
+
+    private CellStyle createWeekendExcelTimeStyle(Workbook workbook) {
+        CellStyle style = workbook.createCellStyle();
+        style.setAlignment(HorizontalAlignment.CENTER);
+        style.setVerticalAlignment(VerticalAlignment.CENTER);
+        style.setBorderBottom(BorderStyle.THIN);
+        style.setBorderTop(BorderStyle.THIN);
+        style.setBorderLeft(BorderStyle.THIN);
+        style.setBorderRight(BorderStyle.THIN);
+        style.setDataFormat(workbook.createDataFormat().getFormat("HH:mm:ss"));
+        style.setFillForegroundColor(IndexedColors.PALE_BLUE.getIndex());
+        style.setFillPattern(FillPatternType.SOLID_FOREGROUND);
+        return style;
+    }
+
+    private CellStyle createWeekendNumberStyle(Workbook workbook) {
+        CellStyle style = workbook.createCellStyle();
+        style.setAlignment(HorizontalAlignment.CENTER);
+        style.setVerticalAlignment(VerticalAlignment.CENTER);
+        style.setBorderBottom(BorderStyle.THIN);
+        style.setBorderTop(BorderStyle.THIN);
+        style.setBorderLeft(BorderStyle.THIN);
+        style.setBorderRight(BorderStyle.THIN);
+        style.setDataFormat(workbook.createDataFormat().getFormat("0.00"));
+        style.setFillForegroundColor(IndexedColors.PALE_BLUE.getIndex());
+        style.setFillPattern(FillPatternType.SOLID_FOREGROUND);
+        return style;
+    }
+
+    private CellStyle createMonthHeaderStyle(Workbook workbook) {
+        CellStyle style = workbook.createCellStyle();
+        Font font = workbook.createFont();
+        font.setBold(true);
+        font.setFontHeightInPoints((short) 12);
+        font.setColor(IndexedColors.WHITE.getIndex());
+        style.setFont(font);
+        style.setAlignment(HorizontalAlignment.CENTER);
+        style.setVerticalAlignment(VerticalAlignment.CENTER);
+        style.setBorderBottom(BorderStyle.THIN);
+        style.setBorderTop(BorderStyle.THIN);
+        style.setBorderLeft(BorderStyle.THIN);
+        style.setBorderRight(BorderStyle.THIN);
+        style.setFillForegroundColor(IndexedColors.DARK_BLUE.getIndex());
+        style.setFillPattern(FillPatternType.SOLID_FOREGROUND);
+        return style;
+    }
+
+    private CellStyle createSignatureBarStyle(Workbook workbook) {
+        CellStyle style = workbook.createCellStyle();
+        Font font = workbook.createFont();
+        font.setBold(true);
+        font.setFontHeightInPoints((short) 12);
+        font.setColor(IndexedColors.WHITE.getIndex());
+        style.setFont(font);
+        style.setAlignment(HorizontalAlignment.CENTER);
+        style.setVerticalAlignment(VerticalAlignment.CENTER);
+        style.setBorderBottom(BorderStyle.THIN);
+        style.setBorderTop(BorderStyle.THIN);
+        style.setBorderLeft(BorderStyle.THIN);
+        style.setBorderRight(BorderStyle.THIN);
+        style.setFillForegroundColor(IndexedColors.TEAL.getIndex());
+        style.setFillPattern(FillPatternType.SOLID_FOREGROUND);
+        return style;
+    }
+
+    private CellStyle createSignatureLabelStyle(Workbook workbook) {
+        CellStyle style = workbook.createCellStyle();
+        Font font = workbook.createFont();
+        font.setBold(true);
+        font.setFontHeightInPoints((short) 10);
+        style.setFont(font);
+        style.setAlignment(HorizontalAlignment.RIGHT);
+        style.setVerticalAlignment(VerticalAlignment.CENTER);
+        style.setBorderBottom(BorderStyle.THIN);
+        style.setBorderTop(BorderStyle.THIN);
+        style.setBorderLeft(BorderStyle.THIN);
+        style.setBorderRight(BorderStyle.THIN);
+        return style;
+    }
+
+    private CellStyle createTotalLabelStyle(Workbook workbook) {
+        CellStyle style = workbook.createCellStyle();
+        Font font = workbook.createFont();
+        font.setBold(true);
+        font.setFontHeightInPoints((short) 11);
+        style.setFont(font);
+        style.setAlignment(HorizontalAlignment.RIGHT);
+        style.setVerticalAlignment(VerticalAlignment.CENTER);
+        style.setBorderBottom(BorderStyle.THIN);
+        style.setBorderTop(BorderStyle.THIN);
+        style.setBorderLeft(BorderStyle.THIN);
+        style.setBorderRight(BorderStyle.THIN);
+        style.setFillForegroundColor(IndexedColors.GREY_25_PERCENT.getIndex());
+        style.setFillPattern(FillPatternType.SOLID_FOREGROUND);
+        return style;
+    }
+
+    private CellStyle createTotalValueStyle(Workbook workbook) {
+        CellStyle style = workbook.createCellStyle();
+        Font font = workbook.createFont();
+        font.setBold(true);
+        font.setFontHeightInPoints((short) 11);
+        style.setFont(font);
+        style.setAlignment(HorizontalAlignment.CENTER);
+        style.setVerticalAlignment(VerticalAlignment.CENTER);
+        style.setBorderBottom(BorderStyle.THIN);
+        style.setBorderTop(BorderStyle.THIN);
+        style.setBorderLeft(BorderStyle.THIN);
+        style.setBorderRight(BorderStyle.THIN);
+        style.setFillForegroundColor(IndexedColors.GREY_25_PERCENT.getIndex());
+        style.setFillPattern(FillPatternType.SOLID_FOREGROUND);
+        style.setDataFormat(workbook.createDataFormat().getFormat("0.00"));
+        return style;
+    }
+
+    // ── Utilitaires ──
+
     private String sanitizeSheetName(String name) {
         String sanitized = name.replaceAll("[\\\\/:*?\\[\\]]+", "_");
         if (sanitized.length() > 31) {
@@ -460,6 +814,8 @@ public class ExportService {
 
         return breakStartDate;
     }
+
+    // ── Classes internes ──
 
     private static class DayData {
         ZonedDateTime workStart;
