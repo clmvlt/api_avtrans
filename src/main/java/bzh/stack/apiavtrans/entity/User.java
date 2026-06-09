@@ -76,6 +76,12 @@ public class User {
     @Column(name = "driver_license_number", length = 50)
     private String driverLicenseNumber;
 
+    @Column(name = "tel_personnel", length = 30)
+    private String telPersonnel;
+
+    @Column(name = "tel_pro", length = 30)
+    private String telPro;
+
     @Column(name = "heure_contrat")
     private Double heureContrat;
 

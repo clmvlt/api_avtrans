@@ -53,6 +53,12 @@ public class UserDTO {
     @Schema(description = "Driver license number", example = "12AB34567")
     private String driverLicenseNumber;
 
+    @Schema(description = "Numéro de téléphone personnel", example = "0612345678")
+    private String telPersonnel;
+
+    @Schema(description = "Numéro de téléphone professionnel", example = "0298765432")
+    private String telPro;
+
     @Schema(description = "Notification preferences")
     private NotificationPreferencesDTO notificationPreferences;
 

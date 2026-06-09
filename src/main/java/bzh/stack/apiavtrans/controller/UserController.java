@@ -126,6 +126,8 @@ public class UserController {
                     request.getIsCouchette(),
                     request.getAddress(),
                     request.getDriverLicenseNumber(),
+                    request.getTelPersonnel(),
+                    request.getTelPro(),
                     request.getHeureContrat()
             );
 

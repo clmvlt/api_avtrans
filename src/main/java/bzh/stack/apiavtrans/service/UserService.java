@@ -188,7 +188,7 @@ public class UserService {
      * Mettre à jour un utilisateur (admin)
      */
     @Transactional
-    public User updateUserAdmin(UUID uuid, String firstName, String lastName, Boolean isActive, UUID roleUuid, Boolean isCouchette, AddressDTO address, String driverLicenseNumber, Double heureContrat) {
+    public User updateUserAdmin(UUID uuid, String firstName, String lastName, Boolean isActive, UUID roleUuid, Boolean isCouchette, AddressDTO address, String driverLicenseNumber, String telPersonnel, String telPro, Double heureContrat) {
         User user = userRepository.findById(uuid)
                 .orElseThrow(() -> new RuntimeException("User not found with uuid: " + uuid));
 
@@ -217,6 +217,12 @@ public class UserService {
         }
         if (driverLicenseNumber != null) {
             user.setDriverLicenseNumber(driverLicenseNumber);
+        }
+        if (telPersonnel != null) {
+            user.setTelPersonnel(telPersonnel);
+        }
+        if (telPro != null) {
+            user.setTelPro(telPro);
         }
         if (heureContrat != null) {
             user.setHeureContrat(heureContrat);

@@ -44,6 +44,8 @@ public class UserMapper {
         dto.setIsCouchette(user.getIsCouchette());
         dto.setAddress(mapAddress(user));
         dto.setDriverLicenseNumber(user.getDriverLicenseNumber());
+        dto.setTelPersonnel(user.getTelPersonnel());
+        dto.setTelPro(user.getTelPro());
         dto.setHeureContrat(user.getHeureContrat());
         dto.setNotificationPreferences(mapNotificationPreferences(user));
 
@@ -75,6 +77,8 @@ public class UserMapper {
         dto.setIsCouchette(user.getIsCouchette());
         dto.setAddress(mapAddress(user));
         dto.setDriverLicenseNumber(user.getDriverLicenseNumber());
+        dto.setTelPersonnel(user.getTelPersonnel());
+        dto.setTelPro(user.getTelPro());
         dto.setHeureContrat(user.getHeureContrat());
         dto.setNotificationPreferences(mapNotificationPreferences(user));
 
@@ -130,6 +134,8 @@ public class UserMapper {
             user.setAddressCountry(dto.getAddress().getCountry());
         }
         user.setDriverLicenseNumber(dto.getDriverLicenseNumber());
+        user.setTelPersonnel(dto.getTelPersonnel());
+        user.setTelPro(dto.getTelPro());
         user.setHeureContrat(dto.getHeureContrat());
 
         return user;
