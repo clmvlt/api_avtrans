@@ -91,11 +91,11 @@ public class SignatureService {
             summary.setHeuresSignees(lastSignature.getHeuresSignees());
         }
 
-        boolean needsToSign = checkIfUserNeedsToSign(user);
-        summary.setNeedsToSign(needsToSign);
-
         double hoursLastMonth = calculateLastMonthHours(user);
         summary.setHeuresLastMonth(hoursLastMonth);
+
+        boolean needsToSign = hoursLastMonth > 0 && checkIfUserNeedsToSign(user);
+        summary.setNeedsToSign(needsToSign);
 
         return summary;
     }
