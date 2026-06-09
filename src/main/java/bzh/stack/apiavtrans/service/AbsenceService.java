@@ -267,12 +267,22 @@ public class AbsenceService {
         return new AbsenceResponse(true, "Absence annulée avec succès", null);
     }
 
-    public PlanningResponse getPlanning(String periodType, Integer year, Integer month, Integer week) {
+    public PlanningResponse getPlanning(String periodType, Integer year, Integer month, Integer week,
+                                         LocalDate customStartDate, LocalDate customEndDate) {
         LocalDate now = LocalDate.now();
         LocalDate startDate;
         LocalDate endDate;
 
-        if ("week".equalsIgnoreCase(periodType)) {
+        if ("custom".equalsIgnoreCase(periodType)) {
+            if (customStartDate == null || customEndDate == null) {
+                throw new RuntimeException("Les paramètres startDate et endDate sont requis pour le type 'custom'");
+            }
+            if (customStartDate.isAfter(customEndDate)) {
+                throw new RuntimeException("La date de début doit être avant la date de fin");
+            }
+            startDate = customStartDate;
+            endDate = customEndDate;
+        } else if ("week".equalsIgnoreCase(periodType)) {
             int targetYear = year != null ? year : now.getYear();
             int targetWeek = week != null ? week : now.get(java.time.temporal.WeekFields.ISO.weekOfYear());
 

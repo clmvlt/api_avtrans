@@ -15,8 +15,10 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.LocalDate;
 import java.util.UUID;
 
 @RestController
@@ -202,12 +204,14 @@ public class AbsenceController {
                         content = @Content(schema = @Schema(implementation = PlanningResponse.class)))
         @GetMapping("/admin/planning")
         public ResponseEntity<?> getPlanning(
-                        @Parameter(description = "Period type: 'week' or 'month'") @RequestParam(defaultValue = "month") String periodType,
+                        @Parameter(description = "Period type: 'week', 'month' or 'custom'") @RequestParam(defaultValue = "month") String periodType,
                         @Parameter(description = "Year (e.g., 2025)") @RequestParam(required = false) Integer year,
                         @Parameter(description = "Month (1-12), used when periodType='month'") @RequestParam(required = false) Integer month,
-                        @Parameter(description = "Week number (1-53), used when periodType='week'") @RequestParam(required = false) Integer week) {
+                        @Parameter(description = "Week number (1-53), used when periodType='week'") @RequestParam(required = false) Integer week,
+                        @Parameter(description = "Start date (yyyy-MM-dd), used when periodType='custom'") @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+                        @Parameter(description = "End date (yyyy-MM-dd), used when periodType='custom'") @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
                 try {
-                        PlanningResponse response = absenceService.getPlanning(periodType, year, month, week);
+                        PlanningResponse response = absenceService.getPlanning(periodType, year, month, week, startDate, endDate);
                         return ResponseEntity.ok(response);
                 } catch (RuntimeException e) {
                         return ResponseEntity.badRequest().body(new ErrorResponse(false, e.getMessage()));
