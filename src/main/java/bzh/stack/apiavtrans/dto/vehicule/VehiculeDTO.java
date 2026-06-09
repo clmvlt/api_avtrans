@@ -21,6 +21,9 @@ public class VehiculeDTO {
     @Schema(description = "Immatriculation du véhicule", example = "AB-123-CD")
     private String immat;
 
+    @Schema(description = "Immatriculation de la remorque/relai associée", example = "EF-456-GH", nullable = true)
+    private String relaiImmat;
+
     @Schema(description = "Date de création du véhicule", example = "2025-01-15T10:30:00+01:00")
     private ZonedDateTime createdAt;
 

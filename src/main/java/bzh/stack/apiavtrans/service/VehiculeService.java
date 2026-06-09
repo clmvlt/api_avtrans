@@ -65,6 +65,7 @@ public class VehiculeService {
 
         Vehicule vehicule = new Vehicule();
         vehicule.setImmat(request.getImmat());
+        vehicule.setRelaiImmat(request.getRelaiImmat());
         vehicule.setModel(request.getModel());
         vehicule.setBrand(request.getBrand());
         vehicule.setComment(request.getComment());
@@ -105,6 +106,7 @@ public class VehiculeService {
         }
 
         vehicule.setImmat(request.getImmat());
+        vehicule.setRelaiImmat(request.getRelaiImmat());
         vehicule.setModel(request.getModel());
         vehicule.setBrand(request.getBrand());
         vehicule.setComment(request.getComment());

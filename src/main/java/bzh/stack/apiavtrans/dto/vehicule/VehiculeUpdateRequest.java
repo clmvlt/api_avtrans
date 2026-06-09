@@ -16,6 +16,9 @@ public class VehiculeUpdateRequest {
     @Schema(description = "Immatriculation du véhicule", example = "AB-123-CD")
     private String immat;
 
+    @Schema(description = "Immatriculation de la remorque/relai associée", example = "EF-456-GH", nullable = true)
+    private String relaiImmat;
+
     @Schema(description = "Modèle du véhicule", example = "Transit Custom")
     private String model;
 

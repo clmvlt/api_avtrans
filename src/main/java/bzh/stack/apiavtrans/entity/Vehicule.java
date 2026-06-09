@@ -27,6 +27,9 @@ public class Vehicule {
     @Column(name = "immat", nullable = false, length = 20)
     private String immat;
 
+    @Column(name = "relai_immat", length = 20)
+    private String relaiImmat;
+
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false, columnDefinition = "TIMESTAMP WITH TIME ZONE")
     private ZonedDateTime createdAt;

@@ -20,6 +20,7 @@ public class VehiculeMapper {
         VehiculeDTO dto = new VehiculeDTO();
         dto.setId(vehicule.getId());
         dto.setImmat(vehicule.getImmat());
+        dto.setRelaiImmat(vehicule.getRelaiImmat());
         dto.setCreatedAt(vehicule.getCreatedAt());
         dto.setModel(vehicule.getModel());
         dto.setBrand(vehicule.getBrand());
@@ -54,6 +55,7 @@ public class VehiculeMapper {
         Vehicule vehicule = new Vehicule();
         vehicule.setId(dto.getId());
         vehicule.setImmat(dto.getImmat());
+        vehicule.setRelaiImmat(dto.getRelaiImmat());
         vehicule.setCreatedAt(dto.getCreatedAt());
         vehicule.setModel(dto.getModel());
         vehicule.setBrand(dto.getBrand());
