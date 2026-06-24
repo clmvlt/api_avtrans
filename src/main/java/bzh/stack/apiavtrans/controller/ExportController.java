@@ -64,7 +64,8 @@ public class ExportController {
                     request.getEndDate()
             );
 
-            String filename = String.format("Heures_Travail_%s_%s.xlsx",
+            String filename = exportService.buildExportFileName(
+                    request.getUserUuids(),
                     request.getStartDate(),
                     request.getEndDate());
 
