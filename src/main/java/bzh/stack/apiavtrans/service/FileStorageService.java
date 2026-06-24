@@ -36,6 +36,9 @@ public class FileStorageService {
     @Value("${app.upload.apk-dir:uploads/apk}")
     private String apkDir;
 
+    @Value("${app.upload.pictures-dir:uploads/pictures}")
+    private String picturesDir;
+
     @Value("${app.base-api-url:http://192.168.1.120:8081}")
     private String baseUrl;
 
@@ -265,6 +268,65 @@ public class FileStorageService {
 
     public Path getApkFilePath(String fileName) {
         return Paths.get(apkDir).resolve(fileName);
+    }
+
+    /**
+     * Télécharge une image depuis une URL distante (ex : photo de profil Google) et la stocke
+     * localement dans le répertoire des photos de profil.
+     * <p>
+     * Opération non bloquante : retourne {@code null} en cas d'échec (URL invalide, timeout, etc.)
+     * afin de ne pas faire échouer la création de compte.
+     *
+     * @param imageUrl URL de l'image à télécharger
+     * @param userId   identifiant de l'utilisateur (utilisé pour nommer le fichier)
+     * @return le nom du fichier stocké (à enregistrer dans {@code User.picturePath}), ou {@code null}
+     */
+    public String savePictureFromUrl(String imageUrl, UUID userId) {
+        if (imageUrl == null || imageUrl.isBlank()) {
+            return null;
+        }
+        try {
+            java.net.URLConnection connection = java.net.URI.create(imageUrl).toURL().openConnection();
+            connection.setConnectTimeout(5000);
+            connection.setReadTimeout(5000);
+            connection.setRequestProperty("User-Agent", "AVTrans");
+
+            byte[] imageBytes;
+            try (java.io.InputStream in = connection.getInputStream()) {
+                imageBytes = in.readAllBytes();
+            }
+
+            if (imageBytes.length == 0) {
+                return null;
+            }
+
+            String extension = extensionFromContentType(connection.getContentType());
+
+            Path uploadPath = Paths.get(picturesDir);
+            if (!Files.exists(uploadPath)) {
+                Files.createDirectories(uploadPath);
+            }
+
+            String fileName = userId.toString() + "_" + System.currentTimeMillis() + "." + extension;
+            Files.write(uploadPath.resolve(fileName), imageBytes);
+
+            return fileName;
+        } catch (Exception e) {
+            // Téléchargement de la photo en échec : non bloquant
+            return null;
+        }
+    }
+
+    private String extensionFromContentType(String contentType) {
+        if (contentType == null) {
+            return "jpg";
+        }
+        return switch (contentType.toLowerCase()) {
+            case "image/png" -> "png";
+            case "image/gif" -> "gif";
+            case "image/webp" -> "webp";
+            default -> "jpg";
+        };
     }
 
     public record FileInfo(String fileName, Long fileSize) {}

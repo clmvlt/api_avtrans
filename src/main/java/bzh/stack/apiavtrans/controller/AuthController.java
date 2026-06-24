@@ -6,6 +6,7 @@ import bzh.stack.apiavtrans.entity.PasswordResetToken;
 import bzh.stack.apiavtrans.entity.User;
 import bzh.stack.apiavtrans.mapper.UserMapper;
 import bzh.stack.apiavtrans.service.AuthService;
+import bzh.stack.apiavtrans.service.GoogleLoginResult;
 import bzh.stack.apiavtrans.service.EmailService;
 import bzh.stack.apiavtrans.service.EmailVerificationService;
 import bzh.stack.apiavtrans.service.PasswordResetService;
@@ -124,6 +125,107 @@ public class AuthController {
             AuthUserDTO userDTO = userMapper.toAuthDTO(user);
 
             return ResponseEntity.ok(new LoginResponse(true, "Connexion réussie", userDTO));
+        } catch (RuntimeException e) {
+            return ResponseEntity.badRequest().body(new ErrorResponse(false, e.getMessage()));
+        }
+    }
+
+    @Operation(
+        summary = "Authenticate via Google",
+        description = "Tente de connecter l'utilisateur à partir d'un ID token Google (Sign in with Google). " +
+                "Retourne status=AUTHENTICATED (avec 'user' et son token) si le compte existe et est actif, " +
+                "ou status=NEEDS_REGISTRATION (avec 'googleProfile') si aucun compte n'existe — le frontend " +
+                "doit alors afficher une page de création pré-remplie et appeler POST /auth/google/register."
+    )
+    @ApiResponses(value = {
+        @ApiResponse(
+            responseCode = "200",
+            description = "AUTHENTICATED (connecté) ou NEEDS_REGISTRATION (création nécessaire)",
+            content = @Content(
+                    mediaType = "application/json",
+                    schema = @Schema(implementation = GoogleAuthResponse.class)
+            )
+        ),
+        @ApiResponse(
+            responseCode = "400",
+            description = "Authentication failed (token invalide, email non vérifié, compte non activé, etc.)",
+            content = @Content(
+                    mediaType = "application/json",
+                    schema = @Schema(implementation = ErrorResponse.class)
+            )
+        )
+    })
+    @PostMapping("/google")
+    public ResponseEntity<?> google(
+            @io.swagger.v3.oas.annotations.parameters.RequestBody(
+                    description = "Google ID token",
+                    required = true,
+                    content = @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = GoogleAuthRequest.class)
+                    )
+            )
+            @RequestBody GoogleAuthRequest request) {
+        try {
+            GoogleLoginResult result = authService.googleLogin(request.getIdToken());
+
+            if (result.authenticated()) {
+                AuthUserDTO userDTO = userMapper.toAuthDTO(result.user());
+                return ResponseEntity.ok(new GoogleAuthResponse(
+                        true, "AUTHENTICATED", "Connexion réussie", userDTO, null));
+            }
+
+            return ResponseEntity.ok(new GoogleAuthResponse(
+                    true, "NEEDS_REGISTRATION",
+                    "Aucun compte n'existe pour cet email. Veuillez compléter votre inscription.",
+                    null, result.profile()));
+        } catch (RuntimeException e) {
+            return ResponseEntity.badRequest().body(new ErrorResponse(false, e.getMessage()));
+        }
+    }
+
+    @Operation(
+        summary = "Register via Google",
+        description = "Crée effectivement un compte via Google après confirmation de l'utilisateur sur la page " +
+                "d'inscription pré-remplie. Le compte est créé avec email vérifié mais inactif : il doit être " +
+                "activé par un administrateur avant la première connexion (status=PENDING_ACTIVATION)."
+    )
+    @ApiResponses(value = {
+        @ApiResponse(
+            responseCode = "200",
+            description = "Compte créé, en attente d'activation (status=PENDING_ACTIVATION)",
+            content = @Content(
+                    mediaType = "application/json",
+                    schema = @Schema(implementation = GoogleAuthResponse.class)
+            )
+        ),
+        @ApiResponse(
+            responseCode = "400",
+            description = "Création impossible (token invalide, email non vérifié, compte déjà existant, etc.)",
+            content = @Content(
+                    mediaType = "application/json",
+                    schema = @Schema(implementation = ErrorResponse.class)
+            )
+        )
+    })
+    @PostMapping("/google/register")
+    public ResponseEntity<?> googleRegister(
+            @io.swagger.v3.oas.annotations.parameters.RequestBody(
+                    description = "Google ID token + prénom/nom confirmés",
+                    required = true,
+                    content = @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = GoogleRegisterRequest.class)
+                    )
+            )
+            @RequestBody GoogleRegisterRequest request) {
+        try {
+            authService.googleRegister(request.getIdToken(), request.getFirstName(), request.getLastName());
+
+            return ResponseEntity.ok(new GoogleAuthResponse(
+                    true, "PENDING_ACTIVATION",
+                    "Votre compte a été créé via Google. Il doit être activé par un administrateur avant la première connexion.",
+                    null, null));
         } catch (RuntimeException e) {
             return ResponseEntity.badRequest().body(new ErrorResponse(false, e.getMessage()));
         }

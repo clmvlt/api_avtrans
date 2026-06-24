@@ -55,6 +55,9 @@ public class User {
     @Column(name = "token", unique = true, length = 255)
     private String token;
 
+    @Column(name = "google_id", unique = true, length = 255)
+    private String googleId;
+
     @Column(name = "picture_path", length = 500)
     private String picturePath;
 
