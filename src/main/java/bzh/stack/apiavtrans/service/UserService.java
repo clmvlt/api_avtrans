@@ -188,7 +188,7 @@ public class UserService {
      * Mettre à jour un utilisateur (admin)
      */
     @Transactional
-    public User updateUserAdmin(UUID uuid, String firstName, String lastName, Boolean isActive, UUID roleUuid, Boolean isCouchette, AddressDTO address, String driverLicenseNumber, String telPersonnel, String telPro, Double heureContrat) {
+    public User updateUserAdmin(UUID uuid, String firstName, String lastName, Boolean isActive, UUID roleUuid, Boolean isCouchette, Boolean isVisible, AddressDTO address, String driverLicenseNumber, String telPersonnel, String telPro, Double heureContrat) {
         User user = userRepository.findById(uuid)
                 .orElseThrow(() -> new RuntimeException("User not found with uuid: " + uuid));
 
@@ -208,6 +208,9 @@ public class UserService {
         }
         if (isCouchette != null) {
             user.setIsCouchette(isCouchette);
+        }
+        if (isVisible != null) {
+            user.setIsVisible(isVisible);
         }
         if (address != null) {
             user.setAddressStreet(address.getStreet());
@@ -232,7 +235,7 @@ public class UserService {
     }
 
     /**
-     * Récupérer tous les utilisateurs avec leur statut de présence (sans heures)
+     * Récupérer tous les utilisateurs avec leur statut de présence (sans heures), y compris les utilisateurs non visibles
      */
     public List<UserDTO> getAllUsersWithStatusOnly() {
         List<User> users = userRepository.findAllByOrderByLastNameAscFirstNameAsc();
@@ -262,10 +265,10 @@ public class UserService {
     }
 
     /**
-     * Récupérer tous les utilisateurs avec leur statut de présence et heures travaillées
+     * Récupérer tous les utilisateurs visibles avec leur statut de présence et heures travaillées
      */
     public List<UserWithStatusDTO> getAllUsersWithStatus() {
-        List<User> users = userRepository.findAllByOrderByLastNameAscFirstNameAsc();
+        List<User> users = userRepository.findAllByIsVisibleTrueOrderByLastNameAscFirstNameAsc();
         List<UserWithStatusDTO> result = new ArrayList<>();
         ZonedDateTime now = ZonedDateTime.now(ZoneId.of("Europe/Paris"));
 
@@ -347,7 +350,7 @@ public class UserService {
 
     @Transactional(readOnly = true)
     public UsersHoursListResponse getAllUsersWithHours() {
-        List<User> allUsers = userRepository.findAllByOrderByLastNameAscFirstNameAsc();
+        List<User> allUsers = userRepository.findAllByIsVisibleTrueOrderByLastNameAscFirstNameAsc();
         List<UserWithHoursDTO> usersWithHours = new ArrayList<>();
 
         ZonedDateTime now = ZonedDateTime.now(ZoneId.of("Europe/Paris"));
@@ -493,11 +496,11 @@ public class UserService {
     }
 
     /**
-     * Comparaison heures contrat vs heures effectuées pour tous les utilisateurs sur un mois donné.
+     * Comparaison heures contrat vs heures effectuées pour tous les utilisateurs visibles sur un mois donné.
      */
     @Transactional(readOnly = true)
     public List<UserContractComparisonDTO> getAllUsersContractComparison(int year, int month) {
-        List<User> users = userRepository.findAllByOrderByLastNameAscFirstNameAsc();
+        List<User> users = userRepository.findAllByIsVisibleTrueOrderByLastNameAscFirstNameAsc();
         List<UserContractComparisonDTO> result = new ArrayList<>();
 
         for (User user : users) {

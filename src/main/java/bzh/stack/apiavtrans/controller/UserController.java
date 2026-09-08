@@ -37,7 +37,7 @@ public class UserController {
     @Operation(
             summary = "[ADMINISTRATEUR] Get all users with status",
             description = """
-                    Returns all users with their current presence status:
+                    Returns all users (including non-visible users, isVisible=false) with their current presence status:
                     - **PRESENT**: User has an active service (not on break)
                     - **ON_BREAK**: User is on break
                     - **ABSENT**: User has no active service
@@ -124,6 +124,7 @@ public class UserController {
                     request.getIsActive(),
                     request.getRoleUuid(),
                     request.getIsCouchette(),
+                    request.getIsVisible(),
                     request.getAddress(),
                     request.getDriverLicenseNumber(),
                     request.getTelPersonnel(),
@@ -159,7 +160,7 @@ public class UserController {
     @Operation(
             summary = "[ADMINISTRATEUR] Get all users with presence status and hours worked today",
             description = """
-                    Returns all users with their current status and worked hours:
+                    Returns all visible users (isVisible=true) with their current status and worked hours:
                     - **PRESENT**: User has an active service (not on break)
                     - **ON_BREAK**: User is on break
                     - **ABSENT**: User has no active service
@@ -189,7 +190,7 @@ public class UserController {
 
     @Operation(
             summary = "[ADMINISTRATEUR] Get all users with worked hours",
-            description = "Returns all users with their worked hours for today, current week, current month, current year, and last month"
+            description = "Returns all visible users (isVisible=true) with their worked hours for today, current week, current month, current year, and last month"
     )
     @ApiResponse(
             responseCode = "200",
@@ -211,7 +212,7 @@ public class UserController {
 
     @Operation(
             summary = "[ADMINISTRATEUR] Comparaison heures contrat vs effectuées pour tous les utilisateurs",
-            description = "Retourne pour chaque utilisateur la comparaison entre ses heures de contrat et ses heures effectuées sur le mois donné. Par défaut : mois en cours."
+            description = "Retourne pour chaque utilisateur visible (isVisible=true) la comparaison entre ses heures de contrat et ses heures effectuées sur le mois donné. Par défaut : mois en cours."
     )
     @ApiResponse(
             responseCode = "200",
@@ -274,8 +275,8 @@ public class UserController {
     }
 
     @Operation(
-            summary = "[ADMINISTRATEUR] Get last vehicle used by each user",
-            description = "Returns an array with the last vehicle (from kilometrage entries) used by each user"
+            summary = "[ADMINISTRATEUR] Get last vehicle used by each visible user (isVisible=true)",
+            description = "Returns an array with the last vehicle (from kilometrage entries) used by each visible user (isVisible=true)"
     )
     @ApiResponse(
             responseCode = "200",

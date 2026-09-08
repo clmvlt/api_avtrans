@@ -299,7 +299,7 @@ public class AbsenceService {
             endDate = startDate.with(TemporalAdjusters.lastDayOfMonth());
         }
 
-        List<User> allUsers = userRepository.findAll();
+        List<User> allUsers = userRepository.findAllByIsVisibleTrueOrderByLastNameAscFirstNameAsc();
         List<PlanningUserDTO> planningUsers = new ArrayList<>();
 
         for (User user : allUsers) {

@@ -42,6 +42,7 @@ public class UserMapper {
             dto.setPictureUrl(baseApiUrl + "/uploads/pictures/" + user.getPicturePath());
         }
         dto.setIsCouchette(user.getIsCouchette());
+        dto.setIsVisible(user.getIsVisible());
         dto.setAddress(mapAddress(user));
         dto.setDriverLicenseNumber(user.getDriverLicenseNumber());
         dto.setTelPersonnel(user.getTelPersonnel());
@@ -75,6 +76,7 @@ public class UserMapper {
             dto.setPictureUrl(baseApiUrl + "/uploads/pictures/" + user.getPicturePath());
         }
         dto.setIsCouchette(user.getIsCouchette());
+        dto.setIsVisible(user.getIsVisible());
         dto.setAddress(mapAddress(user));
         dto.setDriverLicenseNumber(user.getDriverLicenseNumber());
         dto.setTelPersonnel(user.getTelPersonnel());
@@ -127,6 +129,7 @@ public class UserMapper {
         user.setUpdatedAt(dto.getUpdatedAt());
         user.setRole(roleMapper.toEntity(dto.getRole()));
         user.setIsCouchette(dto.getIsCouchette());
+        user.setIsVisible(dto.getIsVisible() != null ? dto.getIsVisible() : true);
         if (dto.getAddress() != null) {
             user.setAddressStreet(dto.getAddress().getStreet());
             user.setAddressCity(dto.getAddress().getCity());

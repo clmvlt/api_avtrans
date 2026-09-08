@@ -124,7 +124,7 @@ public class SignatureController {
         }
     }
 
-    @Operation(summary = "[ADMINISTRATEUR] Get all users with their last signature")
+    @Operation(summary = "[ADMINISTRATEUR] Get all visible users (isVisible=true) with their last signature")
     @ApiResponse(
             responseCode = "200",
             description = "All users with last signature retrieved successfully",

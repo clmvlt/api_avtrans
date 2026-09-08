@@ -4,6 +4,7 @@ import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import org.hibernate.annotations.ColumnDefault;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 
@@ -63,6 +64,10 @@ public class User {
 
     @Column(name = "is_couchette", nullable = false)
     private Boolean isCouchette = false;
+
+    @ColumnDefault("true")
+    @Column(name = "is_visible", nullable = false)
+    private Boolean isVisible = true;
 
     @Column(name = "address_street", length = 255)
     private String addressStreet;

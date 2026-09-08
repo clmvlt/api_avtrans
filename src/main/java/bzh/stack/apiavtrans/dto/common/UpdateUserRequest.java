@@ -27,6 +27,9 @@ public class UpdateUserRequest {
     @Schema(description = "Indique si l'utilisateur a une couchette", example = "false")
     private Boolean isCouchette;
 
+    @Schema(description = "Indique si cet utilisateur est visible dans les services, le planning, etc. (toujours visible dans la liste des utilisateurs)", example = "true")
+    private Boolean isVisible;
+
     @Schema(description = "Adresse de l'utilisateur")
     private AddressDTO address;
 

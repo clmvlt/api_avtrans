@@ -199,7 +199,7 @@ public class AbsenceController {
         }
 
         @RequireRole("Administrateur")
-        @Operation(summary = "[ADMINISTRATEUR] Get absence planning schedule")
+        @Operation(summary = "[ADMINISTRATEUR] Get absence planning schedule", description = "Only visible users (isVisible=true) are included in the planning.")
         @ApiResponse(responseCode = "200", description = "Planning schedule retrieved successfully",
                         content = @Content(schema = @Schema(implementation = PlanningResponse.class)))
         @GetMapping("/admin/planning")

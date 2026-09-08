@@ -52,6 +52,9 @@ public class AuthUserDTO {
     @Schema(description = "Indicates if user has couchette", example = "false")
     private Boolean isCouchette;
 
+    @Schema(description = "Whether user is visible in services, planning and other listings (always visible in the users list)", example = "true")
+    private Boolean isVisible;
+
     @Schema(description = "User address")
     private AddressDTO address;
 

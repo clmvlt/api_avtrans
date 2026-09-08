@@ -165,7 +165,7 @@ public class SignatureService {
 
     @Transactional(readOnly = true)
     public UsersWithLastSignatureListResponse getAllUsersWithLastSignature() {
-        List<User> allUsers = userRepository.findAll();
+        List<User> allUsers = userRepository.findAllByIsVisibleTrueOrderByLastNameAscFirstNameAsc();
         List<UserWithLastSignatureDTO> usersWithSignatures = new ArrayList<>();
 
         for (User user : allUsers) {
