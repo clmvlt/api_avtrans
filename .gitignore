@@ -50,3 +50,7 @@ upload.py
 ### Claude Code ###
 .claude/
 CLAUDE.md
+### DB dumps ###
+backups/
+scripts/
+deploy/
