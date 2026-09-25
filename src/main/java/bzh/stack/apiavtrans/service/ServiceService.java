@@ -10,6 +10,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Duration;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
+import java.time.temporal.ChronoUnit;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -17,6 +18,7 @@ import org.springframework.data.domain.Sort;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
 
 @org.springframework.stereotype.Service
@@ -25,6 +27,7 @@ public class ServiceService {
 
     private final ServiceRepository serviceRepository;
     private final UserRepository userRepository;
+    private final ServiceModificationService serviceModificationService;
 
     private long calculateServiceDuration(Service service, ZonedDateTime calculationTime) {
         if (service.getDuree() != null) {
@@ -325,7 +328,7 @@ public class ServiceService {
     public Service createServiceForUser(UUID userUuid, ZonedDateTime debut, ZonedDateTime fin,
                                        Double latitude, Double longitude,
                                        Double latitudeEnd, Double longitudeEnd,
-                                       Boolean isBreak) {
+                                       Boolean isBreak, User admin) {
         User user = userRepository.findById(userUuid)
                 .orElseThrow(() -> new RuntimeException("User not found with uuid: " + userUuid));
 
@@ -345,16 +348,22 @@ public class ServiceService {
             service.setDuree(durationInSeconds);
         }
 
-        return serviceRepository.save(service);
+        Service saved = serviceRepository.save(service);
+        serviceModificationService.logCreation(saved, admin);
+        return saved;
     }
 
     @Transactional
     public Service updateService(UUID serviceUuid, ZonedDateTime debut, ZonedDateTime fin,
                                 Double latitude, Double longitude,
                                 Double latitudeEnd, Double longitudeEnd,
-                                Boolean isBreak) {
+                                Boolean isBreak, User admin) {
         Service service = serviceRepository.findById(serviceUuid)
                 .orElseThrow(() -> new RuntimeException("Service not found"));
+
+        ZonedDateTime oldDebut = service.getDebut();
+        ZonedDateTime oldFin = service.getFin();
+        Boolean oldIsBreak = service.getIsBreak();
 
         if (debut != null) {
             service.setDebut(debut);
@@ -377,15 +386,35 @@ public class ServiceService {
             service.setDuree(null);
         }
 
-        return serviceRepository.save(service);
+        boolean changed = !isSameSecond(oldDebut, service.getDebut())
+                || !isSameSecond(oldFin, service.getFin())
+                || !Objects.equals(oldIsBreak, service.getIsBreak());
+        if (changed) {
+            service.setModifiedAt(ZonedDateTime.now(ZoneId.of("Europe/Paris")));
+            service.setModifiedBy(admin);
+        }
+
+        Service saved = serviceRepository.save(service);
+        if (changed) {
+            serviceModificationService.logUpdate(saved, oldDebut, oldFin, oldIsBreak, admin);
+        }
+        return saved;
     }
 
     @Transactional
-    public void deleteService(UUID serviceUuid) {
-        if (!serviceRepository.existsById(serviceUuid)) {
-            throw new RuntimeException("Service not found with uuid: " + serviceUuid);
+    public void deleteService(UUID serviceUuid, User admin) {
+        Service service = serviceRepository.findById(serviceUuid)
+                .orElseThrow(() -> new RuntimeException("Service not found with uuid: " + serviceUuid));
+        serviceModificationService.logDeletion(service, admin);
+        serviceRepository.delete(service);
+    }
+
+    // Comparaison à la seconde : le front renvoie les dates avec une précision moindre que la base (microsecondes)
+    private boolean isSameSecond(ZonedDateTime a, ZonedDateTime b) {
+        if (a == null || b == null) {
+            return a == b;
         }
-        serviceRepository.deleteById(serviceUuid);
+        return a.toInstant().truncatedTo(ChronoUnit.SECONDS).equals(b.toInstant().truncatedTo(ChronoUnit.SECONDS));
     }
 
     public Page<Service> getUserServicesHistoryByUuid(UUID userUuid, int page, int size,

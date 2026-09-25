@@ -2,6 +2,7 @@ package bzh.stack.apiavtrans.mapper;
 
 import bzh.stack.apiavtrans.dto.service.ServiceDTO;
 import bzh.stack.apiavtrans.entity.Service;
+import bzh.stack.apiavtrans.entity.User;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
@@ -35,6 +36,13 @@ public class ServiceMapper {
         dto.setLongitudeEnd(service.getLongitudeEnd());
         dto.setIsAdmin(service.getIsAdmin());
         dto.setUserUuid(service.getUser() != null ? service.getUser().getUuid() : null);
+        dto.setModifiedAt(service.getModifiedAt());
+
+        User modifiedBy = service.getModifiedBy();
+        if (modifiedBy != null) {
+            dto.setModifiedByUuid(modifiedBy.getUuid());
+            dto.setModifiedByName(fullName(modifiedBy));
+        }
 
         return dto;
     }
@@ -57,5 +65,11 @@ public class ServiceMapper {
         service.setIsAdmin(dto.getIsAdmin());
 
         return service;
+    }
+
+    private String fullName(User user) {
+        String firstName = user.getFirstName() != null ? user.getFirstName() : "";
+        String lastName = user.getLastName() != null ? user.getLastName() : "";
+        return (firstName + " " + lastName).trim();
     }
 }

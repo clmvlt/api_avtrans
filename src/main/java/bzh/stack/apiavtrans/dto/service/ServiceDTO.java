@@ -1,5 +1,6 @@
 package bzh.stack.apiavtrans.dto.service;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -22,4 +23,13 @@ public class ServiceDTO {
     private Double longitudeEnd;
     private Boolean isAdmin;
     private UUID userUuid;
+
+    @Schema(description = "Date de la dernière modification par un administrateur (null si jamais modifié)")
+    private ZonedDateTime modifiedAt;
+
+    @Schema(description = "UUID de l'administrateur ayant fait la dernière modification")
+    private UUID modifiedByUuid;
+
+    @Schema(description = "Prénom et nom de l'administrateur ayant fait la dernière modification", example = "Jean Dupont")
+    private String modifiedByName;
 }

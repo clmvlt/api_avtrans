@@ -50,4 +50,11 @@ public class Service {
     @ManyToOne
     @JoinColumn(name = "user_uuid", nullable = false)
     private User user;
+
+    @Column(name = "modified_at", columnDefinition = "TIMESTAMP WITH TIME ZONE")
+    private ZonedDateTime modifiedAt;
+
+    @ManyToOne
+    @JoinColumn(name = "modified_by_uuid")
+    private User modifiedBy;
 }

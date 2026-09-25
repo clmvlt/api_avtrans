@@ -36,4 +36,8 @@ public interface ServiceRepository extends JpaRepository<Service, UUID> {
     );
 
     void deleteByUser(User user);
+
+    @org.springframework.data.jpa.repository.Modifying
+    @Query("UPDATE Service s SET s.modifiedBy = null WHERE s.modifiedBy = :user")
+    void setModifiedByToNull(@Param("user") User user);
 }

@@ -8,6 +8,7 @@ import bzh.stack.apiavtrans.entity.Service;
 import bzh.stack.apiavtrans.entity.User;
 import bzh.stack.apiavtrans.mapper.ServiceMapper;
 import bzh.stack.apiavtrans.repository.UserRepository;
+import bzh.stack.apiavtrans.service.ServiceModificationService;
 import bzh.stack.apiavtrans.service.ServiceService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.ArraySchema;
@@ -34,6 +35,7 @@ public class ServiceController {
     private final ServiceService serviceService;
     private final ServiceMapper serviceMapper;
     private final UserRepository userRepository;
+    private final ServiceModificationService serviceModificationService;
 
     @Operation(
             summary = "[UTILISATEUR] Start a service",
@@ -477,7 +479,7 @@ public class ServiceController {
 
     @Operation(
             summary = "[ADMINISTRATEUR] Create service for user",
-            description = "Creates a service for a specific user."
+            description = "Creates a service for a specific user. The action is recorded in the modifications log and other admins are notified."
     )
     @ApiResponse(
             responseCode = "200",
@@ -492,8 +494,10 @@ public class ServiceController {
                     required = true,
                     content = @Content(schema = @Schema(implementation = ServiceCreateRequest.class))
             )
-            @RequestBody ServiceCreateRequest request) {
+            @RequestBody ServiceCreateRequest request,
+            HttpServletRequest httpRequest) {
         try {
+            User admin = (User) httpRequest.getAttribute("user");
             Service service = serviceService.createServiceForUser(
                     request.getUserUuid(),
                     request.getDebut(),
@@ -502,7 +506,8 @@ public class ServiceController {
                     request.getLongitude(),
                     request.getLatitudeEnd(),
                     request.getLongitudeEnd(),
-                    request.getIsBreak()
+                    request.getIsBreak(),
+                    admin
             );
 
             ServiceDTO serviceDTO = serviceMapper.toDTO(service);
@@ -514,7 +519,9 @@ public class ServiceController {
 
     @Operation(
             summary = "[ADMINISTRATEUR] Update service",
-            description = "Updates an existing service."
+            description = "Updates an existing service. If debut, fin or isBreak change, the service is flagged as modified " +
+                    "(modifiedAt, modifiedByUuid, modifiedByName), the old and new values are recorded in the modifications log " +
+                    "and other admins are notified."
     )
     @ApiResponse(
             responseCode = "200",
@@ -530,8 +537,10 @@ public class ServiceController {
                     required = true,
                     content = @Content(schema = @Schema(implementation = ServiceUpdateRequest.class))
             )
-            @RequestBody ServiceUpdateRequest request) {
+            @RequestBody ServiceUpdateRequest request,
+            HttpServletRequest httpRequest) {
         try {
+            User admin = (User) httpRequest.getAttribute("user");
             Service service = serviceService.updateService(
                     java.util.UUID.fromString(uuid),
                     request.getDebut(),
@@ -540,7 +549,8 @@ public class ServiceController {
                     request.getLongitude(),
                     request.getLatitudeEnd(),
                     request.getLongitudeEnd(),
-                    request.getIsBreak()
+                    request.getIsBreak(),
+                    admin
             );
 
             ServiceDTO serviceDTO = serviceMapper.toDTO(service);
@@ -552,7 +562,7 @@ public class ServiceController {
 
     @Operation(
             summary = "[ADMINISTRATEUR] Delete service",
-            description = "Permanently deletes a service."
+            description = "Permanently deletes a service. The deleted values are kept in the modifications log and other admins are notified."
     )
     @ApiResponse(
             responseCode = "204",
@@ -561,9 +571,11 @@ public class ServiceController {
     @RequireRole("Administrateur")
     @DeleteMapping("/admin/{uuid}")
     public ResponseEntity<?> deleteService(
-            @Parameter(description = "Service UUID to delete") @PathVariable String uuid) {
+            @Parameter(description = "Service UUID to delete") @PathVariable String uuid,
+            HttpServletRequest httpRequest) {
         try {
-            serviceService.deleteService(java.util.UUID.fromString(uuid));
+            User admin = (User) httpRequest.getAttribute("user");
+            serviceService.deleteService(java.util.UUID.fromString(uuid), admin);
             return ResponseEntity.noContent().build();
         } catch (RuntimeException e) {
             return ResponseEntity.badRequest().body(new ErrorResponse(false, e.getMessage()));
@@ -637,6 +649,53 @@ public class ServiceController {
             Service service = serviceService.getActiveServiceByUuid(java.util.UUID.fromString(uuid));
             ServiceDTO serviceDTO = service != null ? serviceMapper.toDTO(service) : null;
             return ResponseEntity.ok(new ActiveServiceResponse(true, serviceDTO));
+        } catch (RuntimeException e) {
+            return ResponseEntity.badRequest().body(new ErrorResponse(false, e.getMessage()));
+        }
+    }
+
+    @Operation(
+            summary = "[ADMINISTRATEUR] Get service modifications history",
+            description = "Returns every admin action (CREATE, UPDATE, DELETE) recorded on a service, most recent first. " +
+                    "Works even if the service has been deleted."
+    )
+    @ApiResponse(
+            responseCode = "200",
+            description = "History retrieved successfully",
+            content = @Content(schema = @Schema(implementation = ServiceModificationListResponse.class))
+    )
+    @RequireRole("Administrateur")
+    @GetMapping("/admin/{uuid}/modifications")
+    public ResponseEntity<?> getServiceModifications(
+            @Parameter(description = "Service UUID") @PathVariable String uuid) {
+        try {
+            return ResponseEntity.ok(serviceModificationService.getModificationsForService(java.util.UUID.fromString(uuid)));
+        } catch (RuntimeException e) {
+            return ResponseEntity.badRequest().body(new ErrorResponse(false, e.getMessage()));
+        }
+    }
+
+    @Operation(
+            summary = "[ADMINISTRATEUR] Search services modifications log",
+            description = "Paginated log of admin actions on services, most recent first. " +
+                    "Optional filters: userUuid (employee), modifiedByUuid (admin), action (CREATE, UPDATE, DELETE), startDate/endDate (date of the action)."
+    )
+    @ApiResponse(
+            responseCode = "200",
+            description = "Log retrieved successfully",
+            content = @Content(schema = @Schema(implementation = PagedResponse.class))
+    )
+    @RequireRole("Administrateur")
+    @PostMapping("/admin/modifications")
+    public ResponseEntity<?> searchServiceModifications(
+            @io.swagger.v3.oas.annotations.parameters.RequestBody(
+                    description = "Filters and pagination (optional)",
+                    required = false,
+                    content = @Content(schema = @Schema(implementation = ServiceModificationSearchRequest.class))
+            )
+            @RequestBody(required = false) ServiceModificationSearchRequest request) {
+        try {
+            return ResponseEntity.ok(serviceModificationService.searchModifications(request));
         } catch (RuntimeException e) {
             return ResponseEntity.badRequest().body(new ErrorResponse(false, e.getMessage()));
         }

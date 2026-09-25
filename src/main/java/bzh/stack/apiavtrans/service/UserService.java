@@ -27,6 +27,7 @@ import bzh.stack.apiavtrans.repository.NotificationRepository;
 import bzh.stack.apiavtrans.repository.PasswordResetTokenRepository;
 import bzh.stack.apiavtrans.repository.RapportVehiculeRepository;
 import bzh.stack.apiavtrans.repository.RoleRepository;
+import bzh.stack.apiavtrans.repository.ServiceModificationRepository;
 import bzh.stack.apiavtrans.repository.ServiceRepository;
 import bzh.stack.apiavtrans.repository.SignatureRepository;
 import bzh.stack.apiavtrans.repository.UserRepository;
@@ -60,6 +61,7 @@ public class UserService {
     private final UserRepository userRepository;
     private final RoleRepository roleRepository;
     private final ServiceRepository serviceRepository;
+    private final ServiceModificationRepository serviceModificationRepository;
     private final EmailVerificationRepository emailVerificationRepository;
     private final PasswordResetTokenRepository passwordResetTokenRepository;
     private final AbsenceRepository absenceRepository;
@@ -118,6 +120,8 @@ public class UserService {
         absenceRepository.setValidatedByToNull(user);
         acompteRepository.setValidatedByToNull(user);
         vehiculeKilometrageRepository.setUserToNull(user);
+        serviceRepository.setModifiedByToNull(user);
+        serviceModificationRepository.setModifiedByToNull(user);
 
         // Delete pictures/files linked to rapports, entretiens and adjust infos first
         rapportVehiculePictureRepository.deleteByRapportVehiculeUser(user);
@@ -125,6 +129,7 @@ public class UserService {
         vehiculeAdjustInfoPictureRepository.deleteByAdjustInfoUser(user);
 
         // Delete all related data
+        serviceModificationRepository.deleteByUser(user);
         serviceRepository.deleteByUser(user);
         emailVerificationRepository.deleteByUser(user);
         passwordResetTokenRepository.deleteByUser(user);
