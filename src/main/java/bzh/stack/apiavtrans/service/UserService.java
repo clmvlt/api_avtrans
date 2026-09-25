@@ -492,6 +492,9 @@ public class UserService {
         if (request.getTodo() != null) {
             user.setNotifPrefTodo(request.getTodo());
         }
+        if (request.getServiceModification() != null) {
+            user.setNotifPrefServiceModification(request.getServiceModification());
+        }
         return userRepository.save(user);
     }
 

@@ -26,4 +26,7 @@ public class UpdateNotificationPreferencesRequest {
 
     @Schema(description = "Preference for todo notifications", example = "NONE")
     private NotificationPreference todo;
+
+    @Schema(description = "Preference for notifications when another admin creates, updates or deletes a pointage (admins only)", example = "SITE")
+    private NotificationPreference serviceModification;
 }

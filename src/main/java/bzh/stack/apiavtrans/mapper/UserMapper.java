@@ -107,6 +107,7 @@ public class UserMapper {
         prefs.setUserCreated(user.getNotifPrefUserCreated());
         prefs.setRapportVehicule(user.getNotifPrefRapportVehicule());
         prefs.setTodo(user.getNotifPrefTodo());
+        prefs.setServiceModification(user.getNotifPrefServiceModification());
         return prefs;
     }
 

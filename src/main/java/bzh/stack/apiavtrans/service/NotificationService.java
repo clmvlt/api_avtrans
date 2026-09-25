@@ -172,6 +172,7 @@ public class NotificationService {
             case "user_created" -> user.getNotifPrefUserCreated();
             case "rapport_vehicule" -> user.getNotifPrefRapportVehicule();
             case "todo" -> user.getNotifPrefTodo();
+            case "service_modification" -> user.getNotifPrefServiceModification();
             default -> null;
         };
         return pref != null ? pref : NotificationPreference.NONE;

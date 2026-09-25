@@ -112,4 +112,9 @@ public class User {
     @Enumerated(EnumType.STRING)
     @Column(name = "notif_pref_todo")
     private NotificationPreference notifPrefTodo = NotificationPreference.NONE;
+
+    @ColumnDefault("'SITE'")
+    @Enumerated(EnumType.STRING)
+    @Column(name = "notif_pref_service_modification")
+    private NotificationPreference notifPrefServiceModification = NotificationPreference.SITE;
 }
