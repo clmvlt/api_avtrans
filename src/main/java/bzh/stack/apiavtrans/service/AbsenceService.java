@@ -39,6 +39,7 @@ public class AbsenceService {
     private final AbsenceMapper absenceMapper;
     private final RoleMapper roleMapper;
     private final NotificationService notificationService;
+    private final HeuresAbsenceCalculator heuresAbsenceCalculator;
 
     @Value("${app.base-api-url:http://192.168.1.120:8081}")
     private String baseApiUrl;
@@ -48,13 +49,15 @@ public class AbsenceService {
                           AbsenceTypeRepository absenceTypeRepository,
                           AbsenceMapper absenceMapper,
                           RoleMapper roleMapper,
-                          NotificationService notificationService) {
+                          NotificationService notificationService,
+                          HeuresAbsenceCalculator heuresAbsenceCalculator) {
         this.absenceRepository = absenceRepository;
         this.userRepository = userRepository;
         this.absenceTypeRepository = absenceTypeRepository;
         this.absenceMapper = absenceMapper;
         this.roleMapper = roleMapper;
         this.notificationService = notificationService;
+        this.heuresAbsenceCalculator = heuresAbsenceCalculator;
     }
 
     @Transactional
@@ -403,6 +406,10 @@ public class AbsenceService {
             return new AbsenceResponse(false, "Une absence existe déjà sur cette période", null);
         }
 
+        boolean decompteModifie = !startDate.equals(absence.getStartDate())
+                || !endDate.equals(absence.getEndDate())
+                || period != absence.getPeriod();
+
         absence.setStartDate(startDate);
         absence.setEndDate(endDate);
         absence.setPeriod(period);
@@ -413,7 +420,15 @@ public class AbsenceService {
         if (request.getAbsenceTypeUuid() != null) {
             AbsenceType absenceType = absenceTypeRepository.findById(request.getAbsenceTypeUuid())
                     .orElseThrow(() -> new RuntimeException("Type d'absence non trouvé"));
+            if (absence.getAbsenceType() == null || !absenceType.getUuid().equals(absence.getAbsenceType().getUuid())) {
+                decompteModifie = true;
+            }
             absence.setAbsenceType(absenceType);
+        }
+
+        // Les heures fixées à la main valaient pour l'ancienne période : retour au calcul automatique
+        if (decompteModifie) {
+            absence.setHeuresForcees(null);
         }
         if (request.getCustomType() != null) {
             absence.setCustomType(request.getCustomType());
@@ -430,6 +445,74 @@ public class AbsenceService {
         Absence saved = absenceRepository.save(absence);
 
         return new AbsenceResponse(true, "Absence modifiée avec succès", absenceMapper.toDTO(saved));
+    }
+
+    /**
+     * Aperçu du décompte (jours et heures créditées) d'une absence demandée par l'employé
+     * connecté.
+     */
+    @Transactional(readOnly = true)
+    public AbsenceDecompteResponse getDecompte(String userEmail, AbsenceDecompteRequest request) {
+        User user = userRepository.findByEmail(userEmail)
+                .orElseThrow(() -> new RuntimeException("Utilisateur non trouvé"));
+        return buildDecompte(user, request);
+    }
+
+    /** Aperçu du décompte d'une absence pour un employé donné (administrateur). */
+    @Transactional(readOnly = true)
+    public AbsenceDecompteResponse getDecompteForUser(AbsenceDecompteRequest request) {
+        if (request.getUserUuid() == null) {
+            return new AbsenceDecompteResponse(false, "L'employé est obligatoire", null);
+        }
+        User user = userRepository.findById(request.getUserUuid())
+                .orElseThrow(() -> new RuntimeException("Utilisateur non trouvé"));
+        return buildDecompte(user, request);
+    }
+
+    /**
+     * Fixe à la main les heures créditées par une absence (quel que soit son statut), ou revient au
+     * calcul automatique si {@code heures} est null.
+     */
+    @Transactional
+    public AbsenceResponse setHeuresForcees(UUID absenceUuid, AbsenceHeuresRequest request) {
+        Absence absence = absenceRepository.findById(absenceUuid)
+                .orElseThrow(() -> new RuntimeException("Absence non trouvée"));
+
+        Double heures = request != null ? request.getHeures() : null;
+        if (heures != null && (heures.isNaN() || heures.isInfinite() || heures < 0)) {
+            return new AbsenceResponse(false, "Le nombre d'heures doit être positif ou nul", absenceMapper.toDTO(absence));
+        }
+
+        absence.setHeuresForcees(heures != null ? HeuresAbsenceCalculator.round2(heures) : null);
+        Absence saved = absenceRepository.save(absence);
+
+        String message = heures != null
+                ? "Heures de l'absence modifiées"
+                : "Heures de l'absence recalculées automatiquement";
+        return new AbsenceResponse(true, message, absenceMapper.toDTO(saved));
+    }
+
+    private AbsenceDecompteResponse buildDecompte(User user, AbsenceDecompteRequest request) {
+        if (request.getStartDate().isAfter(request.getEndDate())) {
+            return new AbsenceDecompteResponse(false, "La date de début doit être avant la date de fin", null);
+        }
+
+        AbsenceType absenceType = null;
+        if (request.getAbsenceTypeUuid() != null) {
+            absenceType = absenceTypeRepository.findById(request.getAbsenceTypeUuid())
+                    .orElseThrow(() -> new RuntimeException("Type d'absence non trouvé"));
+        }
+
+        HeuresAbsenceCalculator.AbsenceDecompte decompte = heuresAbsenceCalculator.decompter(
+                request.getStartDate(),
+                request.getEndDate(),
+                parsePeriod(request.getPeriod()),
+                HeuresAbsenceCalculator.modeDe(absenceType),
+                HeuresAbsenceCalculator.compteHeuresDe(absenceType),
+                user.getHeureContrat(),
+                null);
+
+        return new AbsenceDecompteResponse(true, null, absenceMapper.toDecompteDTO(decompte));
     }
 
     private AbsencePeriod parsePeriod(String period) {

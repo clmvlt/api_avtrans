@@ -240,4 +240,79 @@ public class AbsenceController {
                         return ResponseEntity.badRequest().body(new ErrorResponse(false, e.getMessage()));
                 }
         }
+
+        @RequireRole("Utilisateur")
+        @Operation(summary = "[UTILISATEUR] Preview the day and hour count of an absence",
+                description = "Jours décomptés et heures créditées d'après le contrat de l'employé connecté, le mode de "
+                        + "décompte du type (jours ouvrables par défaut, samedi de reprise inclus) et les jours fériés. "
+                        + "Aucune donnée n'est enregistrée.")
+        @ApiResponse(responseCode = "200", description = "Count computed",
+                        content = @Content(schema = @Schema(implementation = AbsenceDecompteResponse.class)))
+        @ApiResponse(responseCode = "400", description = "Invalid dates or unknown absence type")
+        @PostMapping("/decompte")
+        public ResponseEntity<?> getDecompte(
+                        @Valid @RequestBody AbsenceDecompteRequest request,
+                        HttpServletRequest httpRequest) {
+                try {
+                        User user = (User) httpRequest.getAttribute("user");
+                        AbsenceDecompteResponse response = absenceService.getDecompte(user.getEmail(), request);
+
+                        if (!response.isSuccess()) {
+                                return ResponseEntity.badRequest()
+                                                .body(new ErrorResponse(false, response.getMessage()));
+                        }
+
+                        return ResponseEntity.ok(response);
+                } catch (RuntimeException e) {
+                        return ResponseEntity.badRequest().body(new ErrorResponse(false, e.getMessage()));
+                }
+        }
+
+        @RequireRole("Administrateur")
+        @Operation(summary = "[ADMINISTRATEUR] Preview the day and hour count of an absence for a user",
+                description = "Même calcul que /absences/decompte pour l'employé indiqué par userUuid (obligatoire).")
+        @ApiResponse(responseCode = "200", description = "Count computed",
+                        content = @Content(schema = @Schema(implementation = AbsenceDecompteResponse.class)))
+        @ApiResponse(responseCode = "400", description = "Missing user, invalid dates or unknown absence type")
+        @PostMapping("/admin/decompte")
+        public ResponseEntity<?> getDecompteForUser(@Valid @RequestBody AbsenceDecompteRequest request) {
+                try {
+                        AbsenceDecompteResponse response = absenceService.getDecompteForUser(request);
+
+                        if (!response.isSuccess()) {
+                                return ResponseEntity.badRequest()
+                                                .body(new ErrorResponse(false, response.getMessage()));
+                        }
+
+                        return ResponseEntity.ok(response);
+                } catch (RuntimeException e) {
+                        return ResponseEntity.badRequest().body(new ErrorResponse(false, e.getMessage()));
+                }
+        }
+
+        @RequireRole("Administrateur")
+        @Operation(summary = "[ADMINISTRATEUR] Set the hours credited by an absence",
+                description = "Fixe à la main les heures créditées par l'absence, quel que soit son statut ; "
+                        + "heures = null revient au calcul automatique. La valeur forcée est remise à null si les "
+                        + "dates, la période ou le type de l'absence sont modifiés.")
+        @ApiResponse(responseCode = "200", description = "Hours updated",
+                        content = @Content(schema = @Schema(implementation = AbsenceResponse.class)))
+        @ApiResponse(responseCode = "400", description = "Negative hours or absence not found")
+        @PutMapping("/admin/{uuid}/heures")
+        public ResponseEntity<?> setHeuresForcees(
+                        @Parameter(description = "Absence UUID") @PathVariable UUID uuid,
+                        @RequestBody(required = false) AbsenceHeuresRequest request) {
+                try {
+                        AbsenceResponse response = absenceService.setHeuresForcees(uuid, request);
+
+                        if (!response.isSuccess()) {
+                                return ResponseEntity.badRequest()
+                                                .body(new ErrorResponse(false, response.getMessage()));
+                        }
+
+                        return ResponseEntity.ok(response);
+                } catch (RuntimeException e) {
+                        return ResponseEntity.badRequest().body(new ErrorResponse(false, e.getMessage()));
+                }
+        }
 }

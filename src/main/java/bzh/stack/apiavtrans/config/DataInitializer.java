@@ -1,6 +1,7 @@
 package bzh.stack.apiavtrans.config;
 
 import bzh.stack.apiavtrans.entity.AbsenceType;
+import bzh.stack.apiavtrans.entity.AbsenceType.ModeDecompte;
 import bzh.stack.apiavtrans.entity.Role;
 import bzh.stack.apiavtrans.entity.TodoCategory;
 import bzh.stack.apiavtrans.entity.TypeCarte;
@@ -56,6 +57,7 @@ public class DataInitializer {
                 AbsenceType sanssolde = new AbsenceType();
                 sanssolde.setName("Sans solde");
                 sanssolde.setColor("#9E9E9E");
+                sanssolde.setCompteHeures(false);
                 absenceTypeRepository.save(sanssolde);
 
                 AbsenceType autre = new AbsenceType();
@@ -64,6 +66,19 @@ public class DataInitializer {
                 absenceTypeRepository.save(autre);
 
                 System.out.println("Types d'absence initialisés : Congés payés, RTT, Maladie, Sans solde, Autre");
+            }
+
+            // Réglages d'heures des types existants (colonnes ajoutées après coup) : jours
+            // ouvrables, et « Sans solde » ne crédite pas d'heures. Ne touche que les valeurs nulles.
+            for (AbsenceType type : absenceTypeRepository.findByModeDecompteIsNullOrCompteHeuresIsNull()) {
+                if (type.getModeDecompte() == null) {
+                    type.setModeDecompte(ModeDecompte.JOURS_OUVRABLES);
+                }
+                if (type.getCompteHeures() == null) {
+                    type.setCompteHeures(!"sans solde".equalsIgnoreCase(type.getName().trim()));
+                }
+                absenceTypeRepository.save(type);
+                System.out.println("Réglages d'heures renseignés pour le type d'absence : " + type.getName());
             }
 
             if (todoCategoryRepository.count() == 0) {

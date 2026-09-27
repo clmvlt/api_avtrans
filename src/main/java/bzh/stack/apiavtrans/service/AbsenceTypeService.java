@@ -3,6 +3,7 @@ package bzh.stack.apiavtrans.service;
 import bzh.stack.apiavtrans.dto.absence.*;
 import bzh.stack.apiavtrans.entity.Absence;
 import bzh.stack.apiavtrans.entity.AbsenceType;
+import bzh.stack.apiavtrans.entity.AbsenceType.ModeDecompte;
 import bzh.stack.apiavtrans.mapper.AbsenceTypeMapper;
 import bzh.stack.apiavtrans.repository.AbsenceRepository;
 import bzh.stack.apiavtrans.repository.AbsenceTypeRepository;
@@ -15,6 +16,9 @@ import java.util.stream.Collectors;
 
 @Service
 public class AbsenceTypeService {
+
+    private static final String MODE_DECOMPTE_INVALIDE =
+            "Mode de décompte invalide (JOURS_OUVRABLES, JOURS_OUVRES ou JOURS_CALENDAIRES)";
 
     private final AbsenceTypeRepository absenceTypeRepository;
     private final AbsenceTypeMapper absenceTypeMapper;
@@ -43,9 +47,16 @@ public class AbsenceTypeService {
             return new AbsenceTypeResponse(false, "Un type avec ce nom existe déjà", null);
         }
 
+        ModeDecompte mode = parseModeDecompte(request.getModeDecompte());
+        if (mode == null && hasText(request.getModeDecompte())) {
+            return new AbsenceTypeResponse(false, MODE_DECOMPTE_INVALIDE, null);
+        }
+
         AbsenceType absenceType = new AbsenceType();
         absenceType.setName(request.getName());
         absenceType.setColor(request.getColor());
+        absenceType.setModeDecompte(mode != null ? mode : ModeDecompte.JOURS_OUVRABLES);
+        absenceType.setCompteHeures(request.getCompteHeures() != null ? request.getCompteHeures() : true);
 
         AbsenceType saved = absenceTypeRepository.save(absenceType);
 
@@ -61,9 +72,20 @@ public class AbsenceTypeService {
             return new AbsenceTypeResponse(false, "Un type avec ce nom existe déjà", null);
         }
 
+        ModeDecompte mode = parseModeDecompte(request.getModeDecompte());
+        if (mode == null && hasText(request.getModeDecompte())) {
+            return new AbsenceTypeResponse(false, MODE_DECOMPTE_INVALIDE, null);
+        }
+
         absenceType.setName(request.getName());
         if (request.getColor() != null) {
             absenceType.setColor(request.getColor());
+        }
+        if (mode != null) {
+            absenceType.setModeDecompte(mode);
+        }
+        if (request.getCompteHeures() != null) {
+            absenceType.setCompteHeures(request.getCompteHeures());
         }
 
         AbsenceType saved = absenceTypeRepository.save(absenceType);
@@ -102,5 +124,21 @@ public class AbsenceTypeService {
                 .orElseThrow(() -> new RuntimeException("Type d'absence non trouvé"));
 
         return new AbsenceTypeResponse(true, null, absenceTypeMapper.toDTO(absenceType));
+    }
+
+    private static boolean hasText(String value) {
+        return value != null && !value.isBlank();
+    }
+
+    /** Mode de décompte lu sans tenir compte de la casse ; null si absent ou inconnu. */
+    private ModeDecompte parseModeDecompte(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            return ModeDecompte.valueOf(value.trim().toUpperCase());
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
     }
 }

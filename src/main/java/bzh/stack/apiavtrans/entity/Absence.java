@@ -61,6 +61,13 @@ public class Absence {
     @Column(name = "rejection_reason", length = 500)
     private String rejectionReason;
 
+    /**
+     * Heures fixées à la main par un administrateur (null = calcul automatique d'après le
+     * contrat, le type et les jours fériés).
+     */
+    @Column(name = "heures_forcees")
+    private Double heuresForcees;
+
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false, columnDefinition = "TIMESTAMP WITH TIME ZONE")
     private ZonedDateTime createdAt;
