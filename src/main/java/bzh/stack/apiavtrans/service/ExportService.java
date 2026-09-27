@@ -38,12 +38,19 @@ public class ExportService {
     private final UserRepository userRepository;
     private final SignatureRepository signatureRepository;
     private final AbsenceRepository absenceRepository;
+    private final JoursFeriesService joursFeriesService;
+    private final HeuresAbsenceCalculator heuresAbsenceCalculator;
     private static final ZoneId PARIS_ZONE = ZoneId.of("Europe/Paris");
 
     private static final String[] COLUMN_HEADERS = {
             "Date", "Jour", "Début journée", "Début pause", "Fin pause",
-            "Fin journée", "Heures travaillées", "Informations complémentaires", "Autres pauses", "Absence"
+            "Fin journée", "Heures travaillées", "Informations complémentaires", "Autres pauses", "Absence",
+            "Heures créditées"
     };
+
+    /** Dernière colonne du tableau (K) : heures créditées par les absences et les jours fériés. */
+    private static final int LAST_COLUMN = COLUMN_HEADERS.length - 1;
+    private static final int CREDIT_COLUMN = 10;
 
     private static final String[] FR_DAYS_SHORT = {"Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"};
 
@@ -139,13 +146,13 @@ public class ExportService {
         Cell titleCell = titleRow.createCell(0);
         titleCell.setCellValue(user.getFirstName() + " " + user.getLastName());
         titleCell.setCellStyle(titleStyle);
-        sheet.addMergedRegion(new CellRangeAddress(0, 0, 0, 9));
+        sheet.addMergedRegion(new CellRangeAddress(0, 0, 0, LAST_COLUMN));
 
         Row subtitleRow = sheet.createRow(rowNum++);
         Cell subtitleCell = subtitleRow.createCell(0);
         subtitleCell.setCellValue("Période du " + startDate.format(periodFmt) + " au " + endDate.format(periodFmt));
         subtitleCell.setCellStyle(subtitleStyle);
-        sheet.addMergedRegion(new CellRangeAddress(1, 1, 0, 9));
+        sheet.addMergedRegion(new CellRangeAddress(1, 1, 0, LAST_COLUMN));
 
         // ── Traitement des services ──
         ZonedDateTime startDateTime = startDate.atStartOfDay(PARIS_ZONE);
@@ -226,8 +233,9 @@ public class ExportService {
 
         // ── Absences approuvées sur la période (une seule requête, indexées par jour) ──
         Map<LocalDate, List<Absence>> absenceByDay = new HashMap<>();
+        // (depuis la veille : samedi de reprise d'une absence finie un vendredi, pour les heures créditées)
         List<Absence> approvedAbsences = absenceRepository
-                .findApprovedByUserAndDateRange(user, startDate, endDate);
+                .findApprovedByUserAndDateRange(user, startDate.minusDays(1), endDate);
         for (Absence absence : approvedAbsences) {
             LocalDate from = absence.getStartDate().isBefore(startDate) ? startDate : absence.getStartDate();
             LocalDate to = absence.getEndDate().isAfter(endDate) ? endDate : absence.getEndDate();
@@ -236,11 +244,16 @@ public class ExportService {
             }
         }
 
-        // ── Jours fériés français sur la plage d'années couverte ──
-        Map<LocalDate, String> holidays = new HashMap<>();
-        for (int year = startDate.getYear(); year <= endDate.getYear(); year++) {
-            addFrenchHolidays(holidays, year);
+        // ── Jours fériés français sur la période ──
+        Map<LocalDate, String> holidays = joursFeriesService.entre(startDate, endDate);
+
+        // ── Heures créditées par jour (absences approuvées + fériés chômés), hors heures travaillées ──
+        Set<LocalDate> joursTravailles = new HashSet<>();
+        for (bzh.stack.apiavtrans.entity.Service service : workServices) {
+            joursTravailles.add(service.getDebut().withZoneSameInstant(PARIS_ZONE).toLocalDate());
         }
+        HeuresAbsenceCalculator.CreditsPeriode credits = heuresAbsenceCalculator.crediterPeriode(
+                user, approvedAbsences, startDate, endDate, joursTravailles);
 
         // ── Rendu Excel ──
         LocalDate currentDate = startDate;
@@ -462,6 +475,9 @@ public class ExportService {
                         dataCellStyleToUse, workedBaseKey);
             }
 
+            CellStyle creditStyle = dayData != null && dayData.isMultiDayService ? greyedNumberStyle : currentNumber;
+            writeCreditCell(row, credits.jours().get(currentDate), creditStyle);
+
             currentDate = currentDate.plusDays(1);
         }
 
@@ -511,10 +527,10 @@ public class ExportService {
         Cell cell = row.createCell(0);
         cell.setCellValue(text);
         cell.setCellStyle(style);
-        for (int i = 1; i < 10; i++) {
+        for (int i = 1; i <= LAST_COLUMN; i++) {
             row.createCell(i).setCellStyle(style);
         }
-        sheet.addMergedRegion(new CellRangeAddress(rowNum, rowNum, 0, 9));
+        sheet.addMergedRegion(new CellRangeAddress(rowNum, rowNum, 0, LAST_COLUMN));
         return rowNum + 1;
     }
 
@@ -536,9 +552,13 @@ public class ExportService {
         value.setCellFormula("SUM(G" + weekStartExcelRow + ":G" + weekEndExcelRow + ")");
         value.setCellStyle(valueStyle);
 
-        for (int i = 7; i <= 9; i++) {
+        for (int i = 7; i < CREDIT_COLUMN; i++) {
             row.createCell(i).setCellStyle(labelStyle);
         }
+
+        Cell credit = row.createCell(CREDIT_COLUMN);
+        credit.setCellFormula("SUM(K" + weekStartExcelRow + ":K" + weekEndExcelRow + ")");
+        credit.setCellStyle(valueStyle);
 
         return rowNum + 1;
     }
@@ -557,23 +577,63 @@ public class ExportService {
 
         Cell value = row.createCell(6);
         if (!weekSubtotalRows.isEmpty()) {
-            StringBuilder sb = new StringBuilder("SUM(");
-            for (int i = 0; i < weekSubtotalRows.size(); i++) {
-                if (i > 0) {
-                    sb.append(",");
-                }
-                sb.append("G").append(weekSubtotalRows.get(i));
-            }
-            sb.append(")");
-            value.setCellFormula(sb.toString());
+            value.setCellFormula(sumOfCells("G", weekSubtotalRows));
         }
         value.setCellStyle(valueStyle);
 
-        for (int i = 7; i <= 9; i++) {
+        for (int i = 7; i < CREDIT_COLUMN; i++) {
             row.createCell(i).setCellStyle(labelStyle);
         }
 
-        return rowNum + 1;
+        Cell credit = row.createCell(CREDIT_COLUMN);
+        if (!weekSubtotalRows.isEmpty()) {
+            credit.setCellFormula(sumOfCells("K", weekSubtotalRows));
+        }
+        credit.setCellStyle(valueStyle);
+
+        // Total à comparer au contrat : heures travaillées + heures créditées
+        int monthTotalExcelRow = rowNum + 1;
+        Row grandTotalRow = sheet.createRow(rowNum + 1);
+        Cell grandLabel = grandTotalRow.createCell(0);
+        grandLabel.setCellValue("TOTAL DU MOIS (travail + absences + fériés)");
+        grandLabel.setCellStyle(labelStyle);
+        for (int i = 1; i <= 5; i++) {
+            grandTotalRow.createCell(i).setCellStyle(labelStyle);
+        }
+        sheet.addMergedRegion(new CellRangeAddress(rowNum + 1, rowNum + 1, 0, 5));
+
+        Cell grandValue = grandTotalRow.createCell(6);
+        grandValue.setCellFormula("G" + monthTotalExcelRow + "+K" + monthTotalExcelRow);
+        grandValue.setCellStyle(valueStyle);
+
+        for (int i = 7; i <= LAST_COLUMN; i++) {
+            grandTotalRow.createCell(i).setCellStyle(labelStyle);
+        }
+
+        return rowNum + 2;
+    }
+
+    private String sumOfCells(String column, List<Integer> excelRows) {
+        StringBuilder sb = new StringBuilder("SUM(");
+        for (int i = 0; i < excelRows.size(); i++) {
+            if (i > 0) {
+                sb.append(",");
+            }
+            sb.append(column).append(excelRows.get(i));
+        }
+        sb.append(")");
+        return sb.toString();
+    }
+
+    /** Colonne K : heures créditées du jour (valeur non arrondie, affichée à 2 décimales). */
+    private void writeCreditCell(Row row, HeuresAbsenceCalculator.CreditJour credit, CellStyle style) {
+        Cell cell = row.createCell(CREDIT_COLUMN);
+        if (credit != null && credit.total() > 0) {
+            cell.setCellValue(credit.total());
+        } else {
+            cell.setCellValue("");
+        }
+        cell.setCellStyle(style);
     }
 
     private int writeSignatureSection(Sheet sheet, Workbook workbook, User user, YearMonth month,
@@ -674,10 +734,10 @@ public class ExportService {
             Cell notSignedCell = notSignedRow.createCell(0);
             notSignedCell.setCellValue("Non signé pour ce mois");
             notSignedCell.setCellStyle(dataStyle);
-            for (int i = 1; i < 10; i++) {
+            for (int i = 1; i <= LAST_COLUMN; i++) {
                 notSignedRow.createCell(i).setCellStyle(dataStyle);
             }
-            sheet.addMergedRegion(new CellRangeAddress(rowNum, rowNum, 0, 9));
+            sheet.addMergedRegion(new CellRangeAddress(rowNum, rowNum, 0, LAST_COLUMN));
             rowNum++;
         }
 
@@ -713,6 +773,11 @@ public class ExportService {
                 "Colonne « Absence » : la cellule reprend la couleur du type d'absence");
         rowNum = legendText(sheet, rowNum,
                 "Total semaine : base de calcul des heures supplémentaires (> 35 h)");
+        rowNum = legendText(sheet, rowNum,
+                "Colonne « Heures créditées » : absences approuvées (selon le contrat et le type d'absence) "
+                        + "et jours fériés chômés ; elles ne comptent pas dans les heures travaillées");
+        rowNum = legendText(sheet, rowNum,
+                "« Total du mois (travail + absences + fériés) » : à comparer aux heures du contrat");
         rowNum = legendText(sheet, rowNum, "Jours : Lun, Mar, Mer, Jeu, Ven, Sam, Dim");
 
         return rowNum;
@@ -1197,43 +1262,6 @@ public class ExportService {
             default:
                 return "Journée complète";
         }
-    }
-
-    // ── Jours fériés français ──
-
-    private void addFrenchHolidays(Map<LocalDate, String> holidays, int year) {
-        holidays.put(LocalDate.of(year, 1, 1), "Jour de l'An");
-        holidays.put(LocalDate.of(year, 5, 1), "Fête du Travail");
-        holidays.put(LocalDate.of(year, 5, 8), "Victoire 1945");
-        holidays.put(LocalDate.of(year, 7, 14), "Fête nationale");
-        holidays.put(LocalDate.of(year, 8, 15), "Assomption");
-        holidays.put(LocalDate.of(year, 11, 1), "Toussaint");
-        holidays.put(LocalDate.of(year, 11, 11), "Armistice 1918");
-        holidays.put(LocalDate.of(year, 12, 25), "Noël");
-
-        LocalDate easter = computeEaster(year);
-        holidays.put(easter.plusDays(1), "Lundi de Pâques");
-        holidays.put(easter.plusDays(39), "Ascension");
-        holidays.put(easter.plusDays(50), "Lundi de Pentecôte");
-    }
-
-    // Algorithme de Meeus/Jones/Butcher (Pâques grégorien)
-    private LocalDate computeEaster(int year) {
-        int a = year % 19;
-        int b = year / 100;
-        int c = year % 100;
-        int d = b / 4;
-        int e = b % 4;
-        int f = (b + 8) / 25;
-        int g = (b - f + 1) / 3;
-        int h = (19 * a + b - d - g + 15) % 30;
-        int i = c / 4;
-        int k = c % 4;
-        int l = (32 + 2 * e + 2 * i - h - k) % 7;
-        int m = (a + 11 * h + 22 * l) / 451;
-        int month = (h + l - 7 * m + 114) / 31;
-        int day = ((h + l - 7 * m + 114) % 31) + 1;
-        return LocalDate.of(year, month, day);
     }
 
     // ── Utilitaires ──
