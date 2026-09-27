@@ -306,7 +306,8 @@ public class AbsenceService {
         List<PlanningUserDTO> planningUsers = new ArrayList<>();
 
         for (User user : allUsers) {
-            List<Absence> userAbsences = absenceRepository.findOverlappingAbsences(user, startDate, endDate);
+            // Depuis la veille : une absence finie le vendredi précédent décompte le samedi de reprise
+            List<Absence> userAbsences = absenceRepository.findOverlappingAbsences(user, startDate.minusDays(1), endDate);
 
             List<AbsenceDTO> absenceDTOs = userAbsences.stream()
                     .filter(a -> a.getStatus() == AbsenceStatus.APPROVED || a.getStatus() == AbsenceStatus.PENDING)

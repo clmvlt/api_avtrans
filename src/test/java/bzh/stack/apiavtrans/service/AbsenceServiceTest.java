@@ -7,6 +7,7 @@ import bzh.stack.apiavtrans.dto.absence.AbsenceDecompteResponse;
 import bzh.stack.apiavtrans.dto.absence.AbsenceHeuresRequest;
 import bzh.stack.apiavtrans.dto.absence.AbsenceResponse;
 import bzh.stack.apiavtrans.dto.absence.AdminAbsenceUpdateRequest;
+import bzh.stack.apiavtrans.dto.absence.PlanningResponse;
 import bzh.stack.apiavtrans.entity.Absence;
 import bzh.stack.apiavtrans.entity.Absence.AbsencePeriod;
 import bzh.stack.apiavtrans.entity.Absence.AbsenceStatus;
@@ -14,6 +15,7 @@ import bzh.stack.apiavtrans.entity.AbsenceType;
 import bzh.stack.apiavtrans.entity.AbsenceType.ModeDecompte;
 import bzh.stack.apiavtrans.entity.User;
 import bzh.stack.apiavtrans.mapper.AbsenceMapper;
+import bzh.stack.apiavtrans.mapper.RoleMapper;
 import bzh.stack.apiavtrans.repository.AbsenceRepository;
 import bzh.stack.apiavtrans.repository.AbsenceTypeRepository;
 import bzh.stack.apiavtrans.repository.UserRepository;
@@ -27,6 +29,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -50,6 +53,8 @@ class AbsenceServiceTest {
     private AbsenceMapper absenceMapper;
     @Mock
     private NotificationService notificationService;
+    @Mock
+    private RoleMapper roleMapper;
     @Spy
     private HeuresAbsenceCalculator heuresAbsenceCalculator = new HeuresAbsenceCalculator(new JoursFeriesService());
 
@@ -154,6 +159,25 @@ class AbsenceServiceTest {
         absenceService.updateAbsenceByAdmin(absence.getUuid(), request);
 
         assertThat(absence.getHeuresForcees()).isEqualTo(20.0);
+    }
+
+    // ── Planning ──
+
+    @Test
+    void should_include_absences_ending_the_day_before_when_building_planning() {
+        // Août 2026 commence un samedi : une absence finie le vendredi 31/07 y décompte le 01/08
+        when(userRepository.findAllByIsVisibleTrueOrderByLastNameAscFirstNameAsc()).thenReturn(List.of(employe));
+        absence.setStartDate(LocalDate.of(2026, 7, 27));
+        absence.setEndDate(LocalDate.of(2026, 7, 31));
+        when(absenceRepository.findOverlappingAbsences(employe, LocalDate.of(2026, 7, 31), LocalDate.of(2026, 8, 31)))
+                .thenReturn(List.of(absence));
+        when(absenceMapper.toDTO(absence)).thenReturn(new AbsenceDTO());
+
+        PlanningResponse response = absenceService.getPlanning("month", 2026, 8, null, null, null);
+
+        assertThat(response.getStartDate()).isEqualTo(LocalDate.of(2026, 8, 1));
+        assertThat(response.getUsers()).hasSize(1);
+        assertThat(response.getUsers().get(0).getAbsences()).hasSize(1);
     }
 
     // ── Aperçu du décompte ──
