@@ -43,4 +43,22 @@ public class UserContractComparisonDTO {
 
     @Schema(description = "Heures moyennes par jour travaillé", example = "7.5")
     private Double moyenneHeuresParJour;
+
+    @Schema(description = "Heures créditées par les absences approuvées du mois (0 sans contrat)", example = "35.0")
+    private Double heuresAbsences;
+
+    @Schema(description = "Heures créditées par les jours fériés chômés du mois (lun.-sam., non pointés, hors sans solde)", example = "5.83")
+    private Double heuresFeries;
+
+    @Schema(description = "Nombre de jours fériés chômés crédités dans le mois", example = "1")
+    private Integer joursFeries;
+
+    @Schema(description = "Total : heures effectuées + absences + jours fériés", example = "150.5")
+    private Double heuresTotal;
+
+    @Schema(description = "Différence (total - contrat), null sans contrat", example = "-1.17")
+    private Double differenceTotal;
+
+    @Schema(description = "Pourcentage de réalisation du contrat avec les heures créditées, null sans contrat", example = "99.23")
+    private Double pourcentageTotal;
 }

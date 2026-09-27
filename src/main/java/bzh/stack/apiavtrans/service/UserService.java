@@ -78,6 +78,7 @@ public class UserService {
     private final VehiculeAdjustInfoPictureRepository vehiculeAdjustInfoPictureRepository;
     private final CarteRepository carteRepository;
     private final UserMapper userMapper;
+    private final HeuresAbsenceCalculator heuresAbsenceCalculator;
     private final ServiceMapper serviceMapper;
     private final VehiculeKilometrageMapper vehiculeKilometrageMapper;
     private final EmailService emailService;
@@ -569,10 +570,13 @@ public class UserService {
             }
         }
 
-        // Absences approuvées
-        List<Absence> absences = absenceRepository.findApprovedByUserAndDateRange(user, firstDay, lastDay);
+        // Absences approuvées (depuis la veille du mois : samedi de reprise d'une absence finie un vendredi)
+        List<Absence> absences = absenceRepository.findApprovedByUserAndDateRange(user, firstDay.minusDays(1), lastDay);
         double joursAbsence = 0;
         for (Absence absence : absences) {
+            if (absence.getEndDate().isBefore(firstDay)) {
+                continue;
+            }
             LocalDate absStart = absence.getStartDate().isBefore(firstDay) ? firstDay : absence.getStartDate();
             LocalDate absEnd = absence.getEndDate().isAfter(lastDay) ? lastDay : absence.getEndDate();
             for (LocalDate d = absStart; !d.isAfter(absEnd); d = d.plusDays(1)) {
@@ -602,6 +606,17 @@ public class UserService {
                 ? Math.round((heuresEffectuees / joursTravailles) * 100.0) / 100.0
                 : 0.0;
 
+        // Heures créditées : absences approuvées et jours fériés chômés
+        HeuresAbsenceCalculator.CreditsPeriode credits =
+                heuresAbsenceCalculator.crediterPeriode(user, absences, firstDay, lastDay, daysWorked);
+        double heuresTotal = HeuresAbsenceCalculator.round2(heuresEffectuees + credits.total());
+        Double differenceTotal = null;
+        Double pourcentageTotal = null;
+        if (heureContrat != null && heureContrat > 0) {
+            differenceTotal = HeuresAbsenceCalculator.round2(heuresTotal - heureContrat);
+            pourcentageTotal = Math.round((heuresTotal / heureContrat) * 10000.0) / 100.0;
+        }
+
         UserDTO userDTO = userMapper.toDTO(user);
 
         return new UserContractComparisonDTO(
@@ -615,7 +630,13 @@ public class UserService {
                 joursAbsence,
                 joursOuvres,
                 joursTravailles,
-                moyenneParJour
+                moyenneParJour,
+                credits.heuresAbsences(),
+                credits.heuresFeries(),
+                credits.joursFeries(),
+                heuresTotal,
+                differenceTotal,
+                pourcentageTotal
         );
     }
 
