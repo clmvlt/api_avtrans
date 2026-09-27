@@ -69,13 +69,14 @@ public class DataInitializer {
             }
 
             // Réglages d'heures des types existants (colonnes ajoutées après coup) : jours
-            // ouvrables, et « Sans solde » ne crédite pas d'heures. Ne touche que les valeurs nulles.
+            // ouvrables, et un congé sans solde ne crédite pas d'heures. Ne touche que les valeurs nulles.
             for (AbsenceType type : absenceTypeRepository.findByModeDecompteIsNullOrCompteHeuresIsNull()) {
                 if (type.getModeDecompte() == null) {
                     type.setModeDecompte(ModeDecompte.JOURS_OUVRABLES);
                 }
                 if (type.getCompteHeures() == null) {
-                    type.setCompteHeures(!"sans solde".equalsIgnoreCase(type.getName().trim()));
+                    // « Sans solde », « Congé sans solde »… ne créditent pas d'heures
+                    type.setCompteHeures(!type.getName().toLowerCase(java.util.Locale.ROOT).contains("sans solde"));
                 }
                 absenceTypeRepository.save(type);
                 System.out.println("Réglages d'heures renseignés pour le type d'absence : " + type.getName());
