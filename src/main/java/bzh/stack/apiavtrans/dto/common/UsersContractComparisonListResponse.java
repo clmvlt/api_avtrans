@@ -27,4 +27,7 @@ public class UsersContractComparisonListResponse {
 
     @Schema(description = "Liste des comparaisons par utilisateur")
     private List<UserContractComparisonDTO> users;
+
+    @Schema(description = "Jours ouvrés restants dans le mois, d'aujourd'hui inclus (lun.-ven., hors fériés, sans les absences) ; 0 pour un mois passé", example = "5")
+    private Double joursOuvresRestants;
 }

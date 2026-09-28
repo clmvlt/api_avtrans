@@ -540,16 +540,26 @@ public class UserService {
         List<bzh.stack.apiavtrans.entity.Service> services =
                 serviceRepository.findByUserAndDebutBetween(user, monthStart, monthEnd);
 
+        LocalDate today = now.toLocalDate();
         long totalSeconds = 0;
+        long todaySeconds = 0;
         Set<LocalDate> daysWorked = new HashSet<>();
 
         for (bzh.stack.apiavtrans.entity.Service service : services) {
             long duration = calculateServiceDuration(service, calculationEnd);
             if (duration > 0) {
+                boolean startedToday = service.getDebut() != null
+                        && service.getDebut().withZoneSameInstant(zone).toLocalDate().equals(today);
                 if (service.getIsBreak()) {
                     totalSeconds -= duration;
+                    if (startedToday) {
+                        todaySeconds -= duration;
+                    }
                 } else {
                     totalSeconds += duration;
+                    if (startedToday) {
+                        todaySeconds += duration;
+                    }
                     if (service.getDebut() != null) {
                         daysWorked.add(service.getDebut().withZoneSameInstant(zone).toLocalDate());
                     }
@@ -617,6 +627,16 @@ public class UserService {
             pourcentageTotal = Math.round((heuresTotal / heureContrat) * 10000.0) / 100.0;
         }
 
+        // Prévision de fin de mois : total actuel + jours ouvrés restants au rythme du contrat
+        HeuresAbsenceCalculator.PrevisionMois prevision = heuresAbsenceCalculator.prevoirFinDeMois(
+                heureContrat, absences, firstDay, lastDay, today, Math.max(0, todaySeconds / 3600.0));
+        Double heuresPrevisionnelles = null;
+        Double differencePrevisionnelle = null;
+        if (prevision.heuresRestantes() != null) {
+            heuresPrevisionnelles = HeuresAbsenceCalculator.round2(heuresTotal + prevision.heuresRestantes());
+            differencePrevisionnelle = HeuresAbsenceCalculator.round2(heuresPrevisionnelles - heureContrat);
+        }
+
         UserDTO userDTO = userMapper.toDTO(user);
 
         return new UserContractComparisonDTO(
@@ -636,8 +656,25 @@ public class UserService {
                 credits.joursFeries(),
                 heuresTotal,
                 differenceTotal,
-                pourcentageTotal
+                pourcentageTotal,
+                prevision.joursOuvresRestants(),
+                prevision.heuresParJour(),
+                prevision.heuresRestantes(),
+                heuresPrevisionnelles,
+                differencePrevisionnelle
         );
+    }
+
+    /**
+     * Jours ouvrés restants dans le mois, d'aujourd'hui inclus (lun.-ven., hors fériés, sans tenir
+     * compte des absences) ; 0 pour un mois passé.
+     */
+    public double getJoursOuvresRestants(int year, int month) {
+        LocalDate firstDay = LocalDate.of(year, month, 1);
+        LocalDate lastDay = firstDay.plusMonths(1).minusDays(1);
+        LocalDate today = LocalDate.now(ZoneId.of("Europe/Paris"));
+        return heuresAbsenceCalculator.prevoirFinDeMois(null, List.of(), firstDay, lastDay, today, 0)
+                .joursOuvresRestants();
     }
 
     /**

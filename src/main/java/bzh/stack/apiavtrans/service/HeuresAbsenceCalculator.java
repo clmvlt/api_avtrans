@@ -44,6 +44,9 @@ public class HeuresAbsenceCalculator {
     /** Jours par semaine pour la valeur d'un jour férié chômé (jours ouvrables). */
     private static final int JOURS_OUVRABLES_PAR_SEMAINE = 6;
 
+    /** Jours par semaine d'un temps plein du lundi au vendredi (prévision de fin de mois). */
+    private static final int JOURS_OUVRES_PAR_SEMAINE = 5;
+
     private final JoursFeriesService joursFeriesService;
 
     public HeuresAbsenceCalculator(JoursFeriesService joursFeriesService) {
@@ -138,6 +141,19 @@ public class HeuresAbsenceCalculator {
             int joursFeries,
             double total
     ) {
+    }
+
+    /**
+     * Prévision de fin de mois.
+     *
+     * @param joursOuvresRestants jours ouvrés (lun.-ven., hors fériés) d'aujourd'hui inclus à la fin du
+     *                            mois, absences approuvées déduites (demi-journée = 0,5)
+     * @param heuresParJour       heures d'un jour ouvré selon le contrat (heures hebdomadaires / 5),
+     *                            null sans contrat
+     * @param heuresRestantes     heures encore attendues d'ici la fin du mois (aujourd'hui : heures déjà
+     *                            pointées déduites), null sans contrat
+     */
+    public record PrevisionMois(double joursOuvresRestants, Double heuresParJour, Double heuresRestantes) {
     }
 
     // ── Règles des types d'absence ──
@@ -310,5 +326,71 @@ public class HeuresAbsenceCalculator {
 
     public static double round2(double value) {
         return Math.round(value * 100.0) / 100.0;
+    }
+
+    // ── Prévision de fin de mois ──
+
+    /**
+     * Jours ouvrés restants et heures encore attendues jusqu'à la fin du mois, au rythme du contrat
+     * (heures hebdomadaires / 5 par jour ouvré). Les fériés et les absences approuvées sont déjà
+     * crédités sur le mois entier : ces jours ne sont pas comptés une seconde fois. Un mois passé
+     * n'a plus de jour restant ; un mois futur est compté en entier.
+     *
+     * @param absencesApprouvees absences approuvées de l'employé chevauchant le mois
+     * @param aujourdhui         date du jour (Europe/Paris)
+     * @param heuresAujourdhui   heures déjà pointées aujourd'hui, pauses déduites
+     */
+    public PrevisionMois prevoirFinDeMois(Double heureContratMensuel, List<Absence> absencesApprouvees,
+                                          LocalDate firstDay, LocalDate lastDay,
+                                          LocalDate aujourdhui, double heuresAujourdhui) {
+        Double hebdo = heuresHebdo(heureContratMensuel);
+        Double heuresParJour = hebdo != null ? hebdo / JOURS_OUVRES_PAR_SEMAINE : null;
+        LocalDate debut = aujourdhui.isAfter(firstDay) ? aujourdhui : firstDay;
+
+        double jours = 0;
+        double heures = 0;
+        for (LocalDate date = debut; !date.isAfter(lastDay); date = date.plusDays(1)) {
+            double fraction = fractionATravailler(date, absencesApprouvees);
+            if (fraction <= 0) {
+                continue;
+            }
+            jours += fraction;
+            if (heuresParJour != null) {
+                double attendu = heuresParJour * fraction;
+                if (date.equals(aujourdhui)) {
+                    attendu = Math.max(0, attendu - heuresAujourdhui);
+                }
+                heures += attendu;
+            }
+        }
+
+        return new PrevisionMois(
+                jours,
+                heuresParJour != null ? round2(heuresParJour) : null,
+                heuresParJour != null ? round2(heures) : null
+        );
+    }
+
+    /**
+     * Part d'une journée encore à travailler : 0 le week-end, un jour férié ou pendant une absence
+     * en journée complète, 0,5 pendant une demi-journée d'absence, 1 sinon.
+     */
+    private double fractionATravailler(LocalDate date, List<Absence> absences) {
+        DayOfWeek day = date.getDayOfWeek();
+        if (day == DayOfWeek.SATURDAY || day == DayOfWeek.SUNDAY || joursFeriesService.estFerie(date)) {
+            return 0;
+        }
+        double fraction = 1;
+        for (Absence absence : absences) {
+            if (absence.getStartDate() == null || absence.getEndDate() == null
+                    || date.isBefore(absence.getStartDate()) || date.isAfter(absence.getEndDate())) {
+                continue;
+            }
+            if (absence.getPeriod() == null || absence.getPeriod() == AbsencePeriod.FULL_DAY) {
+                return 0;
+            }
+            fraction = 0.5;
+        }
+        return fraction;
     }
 }

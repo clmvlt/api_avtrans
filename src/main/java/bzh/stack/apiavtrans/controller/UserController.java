@@ -234,7 +234,8 @@ public class UserController {
 
             var comparisons = userService.getAllUsersContractComparison(y, m);
             return ResponseEntity.ok(new UsersContractComparisonListResponse(true,
-                    "Comparaisons contrat récupérées avec succès", y, m, comparisons));
+                    "Comparaisons contrat récupérées avec succès", y, m, comparisons,
+                    userService.getJoursOuvresRestants(y, m)));
         } catch (RuntimeException e) {
             return ResponseEntity.badRequest().body(new ErrorResponse(false, e.getMessage()));
         }

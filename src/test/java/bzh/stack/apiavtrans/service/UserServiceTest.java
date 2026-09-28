@@ -167,6 +167,27 @@ class UserServiceTest {
         // Champs historiques inchangés (sans les heures créditées)
         assertThat(result.getDifference()).isEqualTo(-151.67);
         assertThat(result.getJoursAbsence()).isEqualTo(5.0);
+        // Prévision : total actuel + heures restantes au rythme du contrat (7 h par jour ouvré)
+        assertThat(result.getHeuresParJourContrat()).isEqualTo(7.0);
+        assertThat(result.getHeuresPrevisionnelles()).isEqualTo(
+                HeuresAbsenceCalculator.round2(result.getHeuresTotal() + result.getHeuresRestantesPrevues()));
+        assertThat(result.getDifferencePrevisionnelle()).isEqualTo(
+                HeuresAbsenceCalculator.round2(result.getHeuresPrevisionnelles() - 151.67));
+    }
+
+    @Test
+    void should_have_no_forecast_hours_when_contract_is_missing() {
+        when(userRepository.findById(visibleUser.getUuid())).thenReturn(Optional.of(visibleUser));
+        when(serviceRepository.findByUserAndDebutBetween(any(User.class), any(), any())).thenReturn(List.of());
+        when(userMapper.toDTO(any(User.class))).thenAnswer(inv -> dtoOf(inv.getArgument(0)));
+
+        UserContractComparisonDTO result = userService.getUserContractComparison(visibleUser.getUuid(), 2026, 11);
+
+        assertThat(result.getJoursOuvresRestants()).isNotNull();
+        assertThat(result.getHeuresParJourContrat()).isNull();
+        assertThat(result.getHeuresRestantesPrevues()).isNull();
+        assertThat(result.getHeuresPrevisionnelles()).isNull();
+        assertThat(result.getDifferencePrevisionnelle()).isNull();
     }
 
     @Test

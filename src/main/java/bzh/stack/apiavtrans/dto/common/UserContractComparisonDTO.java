@@ -61,4 +61,19 @@ public class UserContractComparisonDTO {
 
     @Schema(description = "Pourcentage de réalisation du contrat avec les heures créditées, null sans contrat", example = "99.23")
     private Double pourcentageTotal;
+
+    @Schema(description = "Jours ouvrés restants d'aujourd'hui inclus à la fin du mois (lun.-ven., fériés et absences approuvées déduits, demi-journée = 0,5) ; 0 pour un mois passé", example = "5.0")
+    private Double joursOuvresRestants;
+
+    @Schema(description = "Heures d'un jour ouvré selon le contrat (heures hebdomadaires / 5), null sans contrat", example = "7.0")
+    private Double heuresParJourContrat;
+
+    @Schema(description = "Heures encore attendues d'ici la fin du mois au rythme du contrat (heures déjà pointées aujourd'hui déduites), null sans contrat", example = "35.0")
+    private Double heuresRestantesPrevues;
+
+    @Schema(description = "Prévision du total à la fin du mois : total actuel + heures restantes prévues, null sans contrat", example = "152.5")
+    private Double heuresPrevisionnelles;
+
+    @Schema(description = "Différence (prévision - contrat), null sans contrat", example = "0.83")
+    private Double differencePrevisionnelle;
 }

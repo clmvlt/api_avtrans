@@ -9,6 +9,7 @@ import bzh.stack.apiavtrans.service.HeuresAbsenceCalculator.AbsenceDecompte;
 import bzh.stack.apiavtrans.service.HeuresAbsenceCalculator.CreditsPeriode;
 import bzh.stack.apiavtrans.service.HeuresAbsenceCalculator.JourDecompte;
 import bzh.stack.apiavtrans.service.HeuresAbsenceCalculator.MotifJour;
+import bzh.stack.apiavtrans.service.HeuresAbsenceCalculator.PrevisionMois;
 import org.junit.jupiter.api.Test;
 
 import java.time.LocalDate;
@@ -247,6 +248,90 @@ class HeuresAbsenceCalculatorTest {
         assertThat(novembre.joursFeries()).isEqualTo(1);
         assertThat(novembre.heuresFeries()).isZero();
         assertThat(novembre.jours()).isEmpty();
+    }
+
+    // ── Prévision de fin de mois ──
+
+    @Test
+    void should_expect_seven_hours_per_remaining_weekday_when_contract_is_35h() {
+        // Lundi 28 septembre 2026 : restent le 28, le 29 et le 30
+        PrevisionMois prevision = calculator.prevoirFinDeMois(CONTRAT_35H, List.of(),
+                date(2026, 9, 1), date(2026, 9, 30), date(2026, 9, 28), 0);
+
+        assertThat(prevision.joursOuvresRestants()).isEqualTo(3.0);
+        assertThat(prevision.heuresParJour()).isEqualTo(7.0);
+        assertThat(prevision.heuresRestantes()).isEqualTo(21.0);
+    }
+
+    @Test
+    void should_deduct_hours_already_worked_today_when_forecasting() {
+        PrevisionMois partiel = calculator.prevoirFinDeMois(CONTRAT_35H, List.of(),
+                date(2026, 9, 1), date(2026, 9, 30), date(2026, 9, 28), 3);
+        PrevisionMois depasse = calculator.prevoirFinDeMois(CONTRAT_35H, List.of(),
+                date(2026, 9, 1), date(2026, 9, 30), date(2026, 9, 28), 9);
+
+        assertThat(partiel.joursOuvresRestants()).isEqualTo(3.0);
+        assertThat(partiel.heuresRestantes()).isEqualTo(18.0);
+        // Journée déjà dépassée : rien n'est retiré aux jours suivants
+        assertThat(depasse.heuresRestantes()).isEqualTo(14.0);
+    }
+
+    @Test
+    void should_skip_holidays_and_approved_absences_when_forecasting() {
+        // Lundi 9 novembre 2026 : 16 jours lun.-ven. jusqu'au 30, moins le 11 (férié),
+        // moins la semaine du 16 au 20 (congés), moins une demi-journée le 23
+        User user = user(CONTRAT_35H);
+        Absence conges = absence(user, type(ModeDecompte.JOURS_OUVRABLES, true), date(2026, 11, 16), date(2026, 11, 20));
+        Absence demiJournee = absence(user, type(ModeDecompte.JOURS_OUVRABLES, true), date(2026, 11, 23), date(2026, 11, 23));
+        demiJournee.setPeriod(AbsencePeriod.MORNING);
+
+        PrevisionMois prevision = calculator.prevoirFinDeMois(CONTRAT_35H, List.of(conges, demiJournee),
+                date(2026, 11, 1), date(2026, 11, 30), date(2026, 11, 9), 0);
+
+        assertThat(prevision.joursOuvresRestants()).isEqualTo(9.5);
+        assertThat(prevision.heuresRestantes()).isEqualTo(66.5);
+    }
+
+    @Test
+    void should_skip_days_of_unpaid_leave_when_forecasting() {
+        User user = user(CONTRAT_35H);
+        Absence sansSolde = absence(user, type(ModeDecompte.JOURS_OUVRABLES, false), date(2026, 9, 29), date(2026, 9, 30));
+
+        PrevisionMois prevision = calculator.prevoirFinDeMois(CONTRAT_35H, List.of(sansSolde),
+                date(2026, 9, 1), date(2026, 9, 30), date(2026, 9, 28), 0);
+
+        assertThat(prevision.joursOuvresRestants()).isEqualTo(1.0);
+        assertThat(prevision.heuresRestantes()).isEqualTo(7.0);
+    }
+
+    @Test
+    void should_have_nothing_left_when_month_is_past() {
+        PrevisionMois prevision = calculator.prevoirFinDeMois(CONTRAT_35H, List.of(),
+                date(2026, 8, 1), date(2026, 8, 31), date(2026, 9, 28), 5);
+
+        assertThat(prevision.joursOuvresRestants()).isZero();
+        assertThat(prevision.heuresRestantes()).isZero();
+    }
+
+    @Test
+    void should_count_whole_month_when_month_is_future() {
+        // Décembre 2026 : 23 jours lun.-ven., moins Noël (vendredi 25)
+        PrevisionMois prevision = calculator.prevoirFinDeMois(CONTRAT_39H, List.of(),
+                date(2026, 12, 1), date(2026, 12, 31), date(2026, 9, 28), 0);
+
+        assertThat(prevision.joursOuvresRestants()).isEqualTo(22.0);
+        assertThat(prevision.heuresParJour()).isEqualTo(7.8);
+        assertThat(prevision.heuresRestantes()).isEqualTo(171.6);
+    }
+
+    @Test
+    void should_count_days_without_hours_when_contract_is_missing() {
+        PrevisionMois prevision = calculator.prevoirFinDeMois(null, List.of(),
+                date(2026, 9, 1), date(2026, 9, 30), date(2026, 9, 28), 0);
+
+        assertThat(prevision.joursOuvresRestants()).isEqualTo(3.0);
+        assertThat(prevision.heuresParJour()).isNull();
+        assertThat(prevision.heuresRestantes()).isNull();
     }
 
     // ── Helpers ──
