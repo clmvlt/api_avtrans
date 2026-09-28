@@ -1,7 +1,6 @@
 package bzh.stack.apiavtrans.service;
 
 import bzh.stack.apiavtrans.dto.common.PagedResponse;
-import bzh.stack.apiavtrans.dto.notification.NotificationCreateRequest;
 import bzh.stack.apiavtrans.dto.service.ServiceModificationDTO;
 import bzh.stack.apiavtrans.dto.service.ServiceModificationListResponse;
 import bzh.stack.apiavtrans.dto.service.ServiceModificationSearchRequest;
@@ -31,8 +30,6 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
@@ -47,8 +44,6 @@ class ServiceModificationServiceTest {
     private ServiceModificationRepository serviceModificationRepository;
     @Mock
     private ServiceModificationMapper serviceModificationMapper;
-    @Mock
-    private NotificationService notificationService;
 
     @InjectMocks
     private ServiceModificationService serviceModificationService;
@@ -89,27 +84,14 @@ class ServiceModificationServiceTest {
     }
 
     @Test
-    void should_notify_other_admins_excluding_author_when_logging_update() {
-        when(serviceModificationRepository.save(any(ServiceModification.class))).thenAnswer(inv -> inv.getArgument(0));
-
-        serviceModificationService.logUpdate(service, DEBUT, FIN, false, admin);
-
-        NotificationCreateRequest notification = captureNotification();
-        assertThat(notification.getTitle()).isEqualTo("Pointage modifié");
-        assertThat(notification.getDescription()).isEqualTo(
-                "Jean Dupont a modifié le service de Paul Martin : 12/09/2026 08:00 → 17:00 devient 12/09/2026 08:30 → 17:00");
-        assertThat(notification.getRefType()).isEqualTo("service_modification");
-        assertThat(notification.getRefId()).isEqualTo(service.getUuid().toString());
-    }
-
-    @Test
-    void should_mention_type_change_when_isBreak_changes() {
+    void should_record_type_change_when_isBreak_changes() {
         when(serviceModificationRepository.save(any(ServiceModification.class))).thenAnswer(inv -> inv.getArgument(0));
         service.setIsBreak(true);
 
-        serviceModificationService.logUpdate(service, DEBUT, FIN, false, admin);
+        ServiceModification saved = serviceModificationService.logUpdate(service, DEBUT, FIN, false, admin);
 
-        assertThat(captureNotification().getDescription()).endsWith("(service → pause)");
+        assertThat(saved.getOldIsBreak()).isFalse();
+        assertThat(saved.getNewIsBreak()).isTrue();
     }
 
     @Test
@@ -126,10 +108,6 @@ class ServiceModificationServiceTest {
         assertThat(saved.getOldIsBreak()).isNull();
         assertThat(saved.getNewDebut()).isEqualTo(DEBUT);
         assertThat(saved.getNewFin()).isNull();
-        NotificationCreateRequest notification = captureNotification();
-        assertThat(notification.getTitle()).isEqualTo("Pointage ajouté");
-        assertThat(notification.getDescription()).isEqualTo(
-                "Jean Dupont a ajouté un service à Paul Martin : 12/09/2026 08:00 → en cours");
     }
 
     @Test
@@ -146,21 +124,6 @@ class ServiceModificationServiceTest {
         assertThat(saved.getNewDebut()).isNull();
         assertThat(saved.getNewFin()).isNull();
         assertThat(saved.getNewIsBreak()).isNull();
-        NotificationCreateRequest notification = captureNotification();
-        assertThat(notification.getTitle()).isEqualTo("Pointage supprimé");
-        assertThat(notification.getDescription()).isEqualTo(
-                "Jean Dupont a supprimé la pause de Paul Martin : 12/09/2026 23:00 → 13/09/2026 01:00");
-    }
-
-    @Test
-    void should_fallback_to_email_when_user_has_no_name() {
-        when(serviceModificationRepository.save(any(ServiceModification.class))).thenAnswer(inv -> inv.getArgument(0));
-        employee.setFirstName(null);
-        employee.setLastName(null);
-
-        serviceModificationService.logDeletion(service, admin);
-
-        assertThat(captureNotification().getDescription()).contains("de paul.martin@avtrans.fr :");
     }
 
     @Test
@@ -228,13 +191,6 @@ class ServiceModificationServiceTest {
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("RENAME");
         verifyNoInteractions(serviceModificationRepository);
-    }
-
-    private NotificationCreateRequest captureNotification() {
-        ArgumentCaptor<NotificationCreateRequest> captor = ArgumentCaptor.forClass(NotificationCreateRequest.class);
-        verify(notificationService).sendNotificationToRoleWithPreferenceExcluding(
-                eq("Administrateur"), captor.capture(), eq("service_modification"), eq(admin.getUuid()));
-        return captor.getValue();
     }
 
     private User buildUser(String firstName, String lastName) {
