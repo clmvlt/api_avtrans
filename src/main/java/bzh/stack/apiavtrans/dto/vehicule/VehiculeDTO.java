@@ -21,7 +21,7 @@ public class VehiculeDTO {
     @Schema(description = "Immatriculation du véhicule", example = "AB-123-CD")
     private String immat;
 
-    @Schema(description = "Immatriculation de la remorque/relai associée", example = "EF-456-GH", nullable = true)
+    @Schema(description = "Immatriculation du véhicule relais en cours (ou ancienne plaque relais saisie à la main)", example = "EF-456-GH", nullable = true)
     private String relaiImmat;
 
     @Schema(description = "Date de création du véhicule", example = "2025-01-15T10:30:00+01:00")
@@ -36,11 +36,20 @@ public class VehiculeDTO {
     @Schema(description = "Commentaire optionnel", example = "Véhicule de livraison principal")
     private String comment;
 
-    @Schema(description = "Kilométrage le plus récent enregistré", example = "125000", nullable = true)
+    @Schema(description = "Kilométrage courant : pendant un relais en cours, celui du véhicule relais (dernier relevé, sinon km au départ) ; sinon le dernier relevé du véhicule", example = "125000", nullable = true)
     private Integer latestKm;
 
-    @Schema(description = "Date du kilométrage le plus récent", example = "2025-01-15T14:20:00+01:00", nullable = true)
+    @Schema(description = "Date du kilométrage courant", example = "2025-01-15T14:20:00+01:00", nullable = true)
     private ZonedDateTime latestKmDate;
+
+    @Schema(description = "Dernier relevé du véhicule lui-même (relevés des relais exclus)", example = "125000", nullable = true)
+    private Integer vehiculeLatestKm;
+
+    @Schema(description = "Date du dernier relevé du véhicule lui-même", example = "2025-01-15T14:20:00+01:00", nullable = true)
+    private ZonedDateTime vehiculeLatestKmDate;
+
+    @Schema(description = "Relais en cours aujourd'hui, null s'il n'y en a pas", nullable = true)
+    private VehiculeRelaiDTO relaiEnCours;
 
     @Schema(description = "URL de la photo de profil du véhicule", example = "http://192.168.1.120:8081/uploads/vehicules/profile/abc123.jpg", nullable = true)
     private String pictureUrl;

@@ -1,10 +1,13 @@
 package bzh.stack.apiavtrans.mapper;
 
 import bzh.stack.apiavtrans.dto.vehicule.VehiculeDTO;
+import bzh.stack.apiavtrans.dto.vehicule.VehiculeRelaiDTO;
 import bzh.stack.apiavtrans.entity.Vehicule;
 import bzh.stack.apiavtrans.entity.VehiculeKilometrage;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
+
+import java.time.ZoneId;
 
 @Component
 public class VehiculeMapper {
@@ -38,12 +41,42 @@ public class VehiculeMapper {
         if (latestKm != null) {
             dto.setLatestKm(latestKm.getKm());
             dto.setLatestKmDate(latestKm.getCreatedAt());
+            dto.setVehiculeLatestKm(latestKm.getKm());
+            dto.setVehiculeLatestKmDate(latestKm.getCreatedAt());
         }
 
         if (vehicule.getPicturePath() != null) {
             dto.setPictureUrl(baseApiUrl + "/uploads/vehicules/profile/" + vehicule.getPicturePath());
         }
 
+        return dto;
+    }
+
+    /**
+     * Véhicule avec son relais en cours : le relais remplace le véhicule, son kilométrage devient le
+     * kilométrage courant ({@code latestKm}), celui que les applications comparent à la saisie du
+     * chauffeur. Le kilométrage du véhicule reste dans {@code vehiculeLatestKm}.
+     *
+     * @param latestKm     dernier relevé du véhicule lui-même (relevés des relais exclus)
+     * @param relaiEnCours relais en cours aujourd'hui, ou null
+     */
+    public VehiculeDTO toDTO(Vehicule vehicule, VehiculeKilometrage latestKm, VehiculeRelaiDTO relaiEnCours) {
+        VehiculeDTO dto = toDTO(vehicule, latestKm);
+        if (dto == null || relaiEnCours == null) {
+            return dto;
+        }
+
+        dto.setRelaiEnCours(relaiEnCours);
+        dto.setRelaiImmat(relaiEnCours.getImmat());
+        if (relaiEnCours.getLatestKm() != null) {
+            dto.setLatestKm(relaiEnCours.getLatestKm());
+            dto.setLatestKmDate(relaiEnCours.getLatestKmDate());
+        } else {
+            dto.setLatestKm(relaiEnCours.getKmDebut());
+            dto.setLatestKmDate(relaiEnCours.getKmDebut() != null
+                    ? relaiEnCours.getDateDebut().atStartOfDay(ZoneId.of("Europe/Paris"))
+                    : null);
+        }
         return dto;
     }
 

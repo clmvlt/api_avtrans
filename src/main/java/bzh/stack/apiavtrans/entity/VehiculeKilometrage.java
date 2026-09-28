@@ -3,7 +3,9 @@ package bzh.stack.apiavtrans.entity;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Data;
+import lombok.EqualsAndHashCode;
 import lombok.NoArgsConstructor;
+import lombok.ToString;
 
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
@@ -34,6 +36,16 @@ public class VehiculeKilometrage {
 
     @Column(name = "created_at", nullable = false, columnDefinition = "TIMESTAMP WITH TIME ZONE")
     private ZonedDateTime createdAt;
+
+    /**
+     * Relais en cours à la date du relevé : le kilométrage est alors celui du véhicule relais, pas du
+     * véhicule (null pour un relevé du véhicule lui-même).
+     */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "relai_id")
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
+    private VehiculeRelai relai;
 
     @PrePersist
     protected void onCreate() {

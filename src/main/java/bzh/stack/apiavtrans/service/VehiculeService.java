@@ -10,13 +10,19 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
 public class VehiculeService {
+
+    private static final ZoneId PARIS = ZoneId.of("Europe/Paris");
 
     private final VehiculeRepository vehiculeRepository;
     private final VehiculeFileRepository vehiculeFileRepository;
@@ -32,16 +38,13 @@ public class VehiculeService {
     private final VehiculeAdjustInfoPictureMapper vehiculeAdjustInfoPictureMapper;
 
     private final FileStorageService fileStorageService;
+    private final VehiculeRelaiService vehiculeRelaiService;
 
     @Transactional(readOnly = true)
     public List<VehiculeDTO> getAllVehicules() {
+        Map<UUID, VehiculeRelai> relaisEnCours = vehiculeRelaiService.relaisEnCoursParVehicule();
         return vehiculeRepository.findAllByOrderByImmatAsc().stream()
-                .map(vehicule -> {
-                    VehiculeKilometrage latestKm = vehiculeKilometrageRepository
-                            .findLatestByVehicule(vehicule)
-                            .orElse(null);
-                    return vehiculeMapper.toDTO(vehicule, latestKm);
-                })
+                .map(vehicule -> toDTO(vehicule, relaisEnCours.get(vehicule.getId())))
                 .collect(Collectors.toList());
     }
 
@@ -50,11 +53,20 @@ public class VehiculeService {
         Vehicule vehicule = vehiculeRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Véhicule non trouvé avec l'ID : " + id));
 
+        return toDTO(vehicule);
+    }
+
+    /** Véhicule avec son dernier relevé et son relais en cours aujourd'hui. */
+    private VehiculeDTO toDTO(Vehicule vehicule) {
+        return toDTO(vehicule, vehiculeRelaiService.relaiActifLe(vehicule, LocalDate.now(PARIS)));
+    }
+
+    private VehiculeDTO toDTO(Vehicule vehicule, VehiculeRelai relaiEnCours) {
         VehiculeKilometrage latestKm = vehiculeKilometrageRepository
                 .findLatestByVehicule(vehicule)
                 .orElse(null);
-
-        return vehiculeMapper.toDTO(vehicule, latestKm);
+        VehiculeRelaiDTO relaiDTO = relaiEnCours != null ? vehiculeRelaiService.toDTO(relaiEnCours) : null;
+        return vehiculeMapper.toDTO(vehicule, latestKm, relaiDTO);
     }
 
     @Transactional
@@ -106,7 +118,10 @@ public class VehiculeService {
         }
 
         vehicule.setImmat(request.getImmat());
-        vehicule.setRelaiImmat(request.getRelaiImmat());
+        // Une fois un relais déclaré, la plaque relais suit les relais : l'ancienne saisie libre est ignorée
+        if (!vehiculeRelaiService.aDesRelais(vehicule)) {
+            vehicule.setRelaiImmat(request.getRelaiImmat());
+        }
         vehicule.setModel(request.getModel());
         vehicule.setBrand(request.getBrand());
         vehicule.setComment(request.getComment());
@@ -130,11 +145,7 @@ public class VehiculeService {
 
         Vehicule updated = vehiculeRepository.save(vehicule);
 
-        VehiculeKilometrage latestKm = vehiculeKilometrageRepository
-                .findLatestByVehicule(updated)
-                .orElse(null);
-
-        return vehiculeMapper.toDTO(updated, latestKm);
+        return toDTO(updated);
     }
 
     @Transactional
@@ -142,6 +153,8 @@ public class VehiculeService {
         Vehicule vehicule = vehiculeRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Véhicule non trouvé avec l'ID : " + id));
 
+        // Relevés et relais partent en cascade : on retire d'abord le lien entre eux
+        vehiculeKilometrageRepository.detacherDesRelais(vehicule);
         vehiculeRepository.delete(vehicule);
     }
 
@@ -225,6 +238,8 @@ public class VehiculeService {
         kilometrage.setVehicule(vehicule);
         kilometrage.setKm(request.getKm());
         kilometrage.setUser(currentUser);
+        // Pendant un relais, le chauffeur relève le compteur du véhicule relais
+        kilometrage.setRelai(vehiculeRelaiService.relaiActifLe(vehicule, LocalDate.now(PARIS)));
 
         VehiculeKilometrage saved = vehiculeKilometrageRepository.save(kilometrage);
         return vehiculeKilometrageMapper.toDTO(saved);
@@ -248,6 +263,7 @@ public class VehiculeService {
         if (request.getCreatedAt() != null) {
             kilometrage.setCreatedAt(request.getCreatedAt());
         }
+        kilometrage.setRelai(vehiculeRelaiService.relaiActifLe(vehicule, dateDuReleve(request.getCreatedAt())));
 
         VehiculeKilometrage saved = vehiculeKilometrageRepository.save(kilometrage);
         return vehiculeKilometrageMapper.toDTO(saved);
@@ -270,10 +286,18 @@ public class VehiculeService {
 
         if (request.getCreatedAt() != null) {
             kilometrage.setCreatedAt(request.getCreatedAt());
+            // Nouvelle date : le relevé suit le relais en cours à cette date (ou revient au véhicule)
+            kilometrage.setRelai(vehiculeRelaiService.relaiActifLe(kilometrage.getVehicule(),
+                    dateDuReleve(request.getCreatedAt())));
         }
 
         VehiculeKilometrage saved = vehiculeKilometrageRepository.save(kilometrage);
         return vehiculeKilometrageMapper.toDTO(saved);
+    }
+
+    /** Jour (Europe/Paris) d'un relevé, aujourd'hui si la date n'est pas fournie. */
+    private static LocalDate dateDuReleve(ZonedDateTime createdAt) {
+        return createdAt != null ? createdAt.withZoneSameInstant(PARIS).toLocalDate() : LocalDate.now(PARIS);
     }
 
     @Transactional(readOnly = true)

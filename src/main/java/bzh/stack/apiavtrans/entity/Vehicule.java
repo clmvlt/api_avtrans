@@ -27,6 +27,10 @@ public class Vehicule {
     @Column(name = "immat", nullable = false, length = 20)
     private String immat;
 
+    /**
+     * Ancienne saisie libre de la plaque relais, antérieure au suivi des relais ({@link VehiculeRelai}).
+     * Vidée à la déclaration du premier relais du véhicule, puis ignorée.
+     */
     @Column(name = "relai_immat", length = 20)
     private String relaiImmat;
 
@@ -93,4 +97,7 @@ public class Vehicule {
 
     @OneToMany(mappedBy = "vehicule", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<VehiculeEquipement> equipements = new ArrayList<>();
+
+    @OneToMany(mappedBy = "vehicule", cascade = CascadeType.ALL, orphanRemoval = true)
+    private List<VehiculeRelai> relais = new ArrayList<>();
 }

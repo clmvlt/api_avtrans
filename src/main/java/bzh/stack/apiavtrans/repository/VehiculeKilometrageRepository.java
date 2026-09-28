@@ -2,6 +2,7 @@ package bzh.stack.apiavtrans.repository;
 
 import bzh.stack.apiavtrans.entity.VehiculeKilometrage;
 import bzh.stack.apiavtrans.entity.Vehicule;
+import bzh.stack.apiavtrans.entity.VehiculeRelai;
 import bzh.stack.apiavtrans.entity.User;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -26,8 +27,31 @@ public interface VehiculeKilometrageRepository extends JpaRepository<VehiculeKil
 
     Page<VehiculeKilometrage> findByVehiculeOrderByCreatedAtDesc(Vehicule vehicule, Pageable pageable);
 
-    @Query("SELECT vk FROM VehiculeKilometrage vk WHERE vk.vehicule = :vehicule ORDER BY vk.createdAt DESC LIMIT 1")
+    /** Dernier relevé du véhicule lui-même : les relevés d'un véhicule relais sont ignorés. */
+    @Query("SELECT vk FROM VehiculeKilometrage vk WHERE vk.vehicule = :vehicule AND vk.relai IS NULL ORDER BY vk.createdAt DESC LIMIT 1")
     Optional<VehiculeKilometrage> findLatestByVehicule(Vehicule vehicule);
+
+    @Query("SELECT vk FROM VehiculeKilometrage vk WHERE vk.relai = :relai ORDER BY vk.createdAt DESC LIMIT 1")
+    Optional<VehiculeKilometrage> findLatestByRelai(@Param("relai") VehiculeRelai relai);
+
+    long countByRelai(VehiculeRelai relai);
+
+    @Modifying(flushAutomatically = true)
+    @Query("UPDATE VehiculeKilometrage vk SET vk.relai = null WHERE vk.relai = :relai")
+    int detacherDuRelai(@Param("relai") VehiculeRelai relai);
+
+    @Modifying(flushAutomatically = true)
+    @Query("UPDATE VehiculeKilometrage vk SET vk.relai = null WHERE vk.vehicule = :vehicule AND vk.relai IS NOT NULL")
+    int detacherDesRelais(@Param("vehicule") Vehicule vehicule);
+
+    /** Rattache au relais les relevés du véhicule saisis dans [debut, fin[. */
+    @Modifying(flushAutomatically = true)
+    @Query("UPDATE VehiculeKilometrage vk SET vk.relai = :relai WHERE vk.vehicule = :vehicule " +
+           "AND vk.createdAt >= :debut AND vk.createdAt < :fin")
+    int rattacherAuRelai(@Param("relai") VehiculeRelai relai,
+                         @Param("vehicule") Vehicule vehicule,
+                         @Param("debut") ZonedDateTime debut,
+                         @Param("fin") ZonedDateTime fin);
 
     @Query("SELECT vk FROM VehiculeKilometrage vk WHERE vk.user = :user ORDER BY vk.createdAt DESC LIMIT 1")
     Optional<VehiculeKilometrage> findLatestByUser(@Param("user") User user);

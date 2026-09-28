@@ -29,4 +29,10 @@ public class VehiculeKilometrageDTO {
 
     @Schema(description = "Date du relevé", example = "2025-01-15T14:20:00+01:00")
     private ZonedDateTime createdAt;
+
+    @Schema(description = "Relais en cours à la date du relevé : le kilométrage est celui du véhicule relais (null pour un relevé du véhicule)", nullable = true)
+    private UUID relaiId;
+
+    @Schema(description = "Immatriculation du véhicule relais du relevé", example = "EF-456-GH", nullable = true)
+    private String relaiImmat;
 }

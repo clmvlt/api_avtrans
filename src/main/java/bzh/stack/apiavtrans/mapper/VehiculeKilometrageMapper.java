@@ -22,6 +22,10 @@ public class VehiculeKilometrageMapper {
         dto.setKm(kilometrage.getKm());
         dto.setUser(userMapper.toDTO(kilometrage.getUser()));
         dto.setCreatedAt(kilometrage.getCreatedAt());
+        if (kilometrage.getRelai() != null) {
+            dto.setRelaiId(kilometrage.getRelai().getId());
+            dto.setRelaiImmat(kilometrage.getRelai().getImmat());
+        }
 
         return dto;
     }
