@@ -35,6 +35,7 @@ build/
 ### Application config (credentials) ###
 src/main/resources/application.properties
 src/main/resources/api.properties
+src/main/resources/prod.application.properties
 
 ### Logs ###
 logs/
@@ -54,3 +55,6 @@ CLAUDE.md
 backups/
 scripts/
 deploy/
+
+### Python ###
+__pycache__/
