@@ -304,22 +304,21 @@ public class ServiceController {
 
     @Operation(
             summary = "[UTILISATEUR] Get daily services",
-            description = "Work services started today (Europe/Paris) for the authenticated user, each with its pauses " +
-                    "(including pauses taken after midnight). Breaks are not returned at the top level."
+            description = "Current workday of the authenticated user: work services attached to one day (their start day, Europe/Paris), " +
+                    "each with its pauses, plus the net hours of that day. It is today, or yesterday for a night service still running " +
+                    "or ended after midnight, as long as no service started today (aujourdhui=false, date=yesterday)."
     )
     @ApiResponse(
             responseCode = "200",
-            description = "Daily services retrieved successfully",
-            content = @Content(array = @ArraySchema(schema = @Schema(implementation = ServiceDTO.class)))
+            description = "Workday retrieved successfully",
+            content = @Content(schema = @Schema(implementation = JourneeTravailResponse.class))
     )
     @RequireRole("Utilisateur")
     @GetMapping("/user/daily")
     public ResponseEntity<?> getDailyServices(HttpServletRequest httpRequest) {
         try {
             User user = (User) httpRequest.getAttribute("user");
-            List<ServiceDTO> serviceDTOs = serviceService.getDailyServices(user.getEmail());
-
-            return ResponseEntity.ok(serviceDTOs);
+            return ResponseEntity.ok(serviceService.getDailyServices(user.getEmail()));
         } catch (RuntimeException e) {
             return ResponseEntity.badRequest().body(new ErrorResponse(false, e.getMessage()));
         }

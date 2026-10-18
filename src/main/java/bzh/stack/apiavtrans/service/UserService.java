@@ -299,8 +299,10 @@ public class UserService {
         ServiceDTO activeService = tempsTravailService.etatActuel(user, now);
         dto.setActiveService(activeService);
         dto.setStatus(TempsTravailService.statut(activeService));
+        LocalDate journee = tempsTravailService.journeeEnCours(user, now);
         dto.setHoursToday(TempsTravailService.versHeures(
-                tempsTravailService.bilan(user, PeriodeHeures.DAY.fenetre(now), now)));
+                tempsTravailService.bilan(user, PeriodeHeures.Fenetre.jours(journee, journee), now)));
+        dto.setJournee(journee);
         dto.setCalculeLe(now);
 
         return dto;
@@ -322,14 +324,19 @@ public class UserService {
             UserDTO userDTO = userMapper.toDTO(user);
             userDTO.setStatus(TempsTravailService.statut(tempsTravailService.etatActuel(user, now)));
 
-            Map<PeriodeHeures, TempsTravailCalculator.Bilan> bilans = tempsTravailService.bilans(user, fenetres, now);
+            // Journée de travail en cours (celle de la veille pour un service de nuit), périodes calendaires sinon
+            LocalDate journee = tempsTravailService.journeeEnCours(user, now);
+            Map<PeriodeHeures, PeriodeHeures.Fenetre> fenetresUser = new EnumMap<>(fenetres);
+            fenetresUser.put(PeriodeHeures.DAY, PeriodeHeures.Fenetre.jours(journee, journee));
+            Map<PeriodeHeures, TempsTravailCalculator.Bilan> bilans = tempsTravailService.bilans(user, fenetresUser, now);
             UserHoursDTO hoursDTO = new UserHoursDTO(
                     TempsTravailService.versHeures(bilans.get(PeriodeHeures.DAY)),
                     TempsTravailService.versHeures(bilans.get(PeriodeHeures.WEEK)),
                     TempsTravailService.versHeures(bilans.get(PeriodeHeures.MONTH)),
                     TempsTravailService.versHeures(bilans.get(PeriodeHeures.YEAR)),
                     TempsTravailService.versHeures(bilans.get(PeriodeHeures.LASTMONTH)),
-                    now);
+                    now,
+                    journee);
             usersWithHours.add(new UserWithHoursDTO(userDTO, hoursDTO));
         }
 

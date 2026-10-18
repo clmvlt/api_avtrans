@@ -114,6 +114,21 @@ class ServiceRepositoryPostgresTest {
     }
 
     @Test
+    void should_find_latest_work_service_touching_a_day_when_night_service_crosses_midnight() {
+        // Le 13/10 : le service de nuit du 12/10 (fini à 5 h) touche la journée ; le 14/10 rien
+        assertThat(serviceRepository.findServicesTravailChevauchant(chauffeur, day(13), day(14), PageRequest.of(0, 1)))
+                .extracting(Service::getUuid).containsExactly(nuit.getUuid());
+        assertThat(serviceRepository.findServicesTravailChevauchant(chauffeur, day(14), day(15), PageRequest.of(0, 1)))
+                .isEmpty();
+        // Le 17/10 : le service en cours depuis le 16/10 touche la journée
+        assertThat(serviceRepository.findServicesTravailChevauchant(chauffeur, day(17), day(18), PageRequest.of(0, 1)))
+                .extracting(Service::getUuid).containsExactly(enCours.getUuid());
+        // Le 12/10 : le service du collègue n'est jamais renvoyé
+        assertThat(serviceRepository.findServicesTravailChevauchant(chauffeur, day(12), day(13), PageRequest.of(0, 5)))
+                .extracting(Service::getUuid).containsExactly(nuit.getUuid());
+    }
+
+    @Test
     void should_filter_history_with_optional_parameters_on_postgres() {
         var page = serviceRepository.findByUserWithFilters(chauffeur, false, day(12), null,
                 PageRequest.of(0, 10, Sort.by(Sort.Direction.DESC, "debut")));

@@ -107,6 +107,7 @@ class UserServiceTest {
         when(userMapper.toDTO(any(User.class))).thenAnswer(inv -> dtoOf(inv.getArgument(0)));
 
         when(tempsTravailService.bilan(any(User.class), any(), any())).thenReturn(TempsTravailCalculator.Bilan.VIDE);
+        when(tempsTravailService.journeeEnCours(any(User.class), any())).thenReturn(LocalDate.of(2026, 10, 12));
 
         List<UserWithStatusDTO> result = userService.getAllUsersWithStatus();
 
@@ -114,6 +115,7 @@ class UserServiceTest {
         assertThat(result.get(0).getStatus()).isEqualTo(TempsTravailService.STATUT_ABSENT);
         assertThat(result.get(0).getHoursToday().getSecondes()).isZero();
         assertThat(result.get(0).getCalculeLe()).isNotNull();
+        assertThat(result.get(0).getJournee()).isEqualTo(LocalDate.of(2026, 10, 12));
         verify(userRepository, never()).findAllByOrderByLastNameAscFirstNameAsc();
     }
 
@@ -127,6 +129,7 @@ class UserServiceTest {
             bilans.put(periode, TempsTravailCalculator.Bilan.VIDE);
         }
         when(tempsTravailService.bilans(any(User.class), any(), any())).thenReturn(bilans);
+        when(tempsTravailService.journeeEnCours(any(User.class), any())).thenReturn(LocalDate.of(2026, 10, 12));
 
         UsersHoursListResponse response = userService.getAllUsersWithHours();
 

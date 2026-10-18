@@ -1,5 +1,6 @@
 package bzh.stack.apiavtrans.service;
 
+import bzh.stack.apiavtrans.dto.service.JourneeTravailResponse;
 import bzh.stack.apiavtrans.dto.service.ServiceDTO;
 import bzh.stack.apiavtrans.dto.service.WorkedHoursDto;
 import bzh.stack.apiavtrans.entity.Service;
@@ -18,6 +19,7 @@ import org.springframework.data.domain.Sort;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
+import java.time.LocalDate;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
@@ -132,11 +134,15 @@ public class ServiceService {
         return tempsTravailService.etatActuel(userByUuid(userUuid), maintenant());
     }
 
-    /** Services de travail débutés aujourd'hui, avec leurs pauses (même après minuit). */
+    /**
+     * Journée de travail en cours avec ses services et leurs pauses : celle d'aujourd'hui, ou celle de la veille
+     * pour un service de nuit en cours ou terminé après minuit (tant qu'aucun service n'a repris aujourd'hui).
+     */
     @Transactional(readOnly = true)
-    public List<ServiceDTO> getDailyServices(String userEmail) {
+    public JourneeTravailResponse getDailyServices(String userEmail) {
+        User user = userByEmail(userEmail);
         ZonedDateTime maintenant = maintenant();
-        return servicesDeLaFenetre(userByEmail(userEmail), PeriodeHeures.DAY.fenetre(maintenant), maintenant);
+        return tempsTravailService.journee(user, tempsTravailService.journeeEnCours(user, maintenant), maintenant);
     }
 
     /** Services de travail débutés dans le mois, avec leurs pauses. */
@@ -294,18 +300,23 @@ public class ServiceService {
         Map<PeriodeHeures, Fenetre> fenetres = new EnumMap<>(PeriodeHeures.class);
         if (period != null && !period.isBlank()) {
             PeriodeHeures periode = PeriodeHeures.parse(period);
-            fenetres.put(periode, periode.fenetre(maintenant, year, month, week, day));
+            fenetres.put(periode, periode == PeriodeHeures.DAY
+                    ? fenetreJour(user, maintenant, year, month, day)
+                    : periode.fenetre(maintenant, year, month, week, day));
         } else {
             fenetres.put(PeriodeHeures.YEAR, PeriodeHeures.YEAR.fenetre(maintenant, year, null, null, null));
             fenetres.put(PeriodeHeures.MONTH, PeriodeHeures.MONTH.fenetre(maintenant, year, month, null, null));
             fenetres.put(PeriodeHeures.WEEK, PeriodeHeures.WEEK.fenetre(maintenant, year, null, week, null));
-            fenetres.put(PeriodeHeures.DAY, PeriodeHeures.DAY.fenetre(maintenant, year, month, null, day));
+            fenetres.put(PeriodeHeures.DAY, fenetreJour(user, maintenant, year, month, day));
             fenetres.put(PeriodeHeures.LASTMONTH, PeriodeHeures.LASTMONTH.fenetre(maintenant));
         }
 
         Map<PeriodeHeures, Bilan> bilans = tempsTravailService.bilans(user, fenetres, maintenant);
         WorkedHoursDto dto = new WorkedHoursDto();
         dto.setCalculeLe(maintenant);
+        if (fenetres.containsKey(PeriodeHeures.DAY)) {
+            dto.setJour(fenetres.get(PeriodeHeures.DAY).debut().toLocalDate());
+        }
         bilans.forEach((periode, bilan) -> {
             var heures = TempsTravailService.versHeures(bilan);
             switch (periode) {
@@ -317,6 +328,15 @@ public class ServiceService {
             }
         });
         return dto;
+    }
+
+    /** Jour demandé ; sans paramètre, la journée de travail en cours (celle de la veille pour un service de nuit). */
+    private Fenetre fenetreJour(User user, ZonedDateTime maintenant, Integer year, Integer month, Integer day) {
+        if (year == null && month == null && day == null) {
+            LocalDate journee = tempsTravailService.journeeEnCours(user, maintenant);
+            return Fenetre.jours(journee, journee);
+        }
+        return PeriodeHeures.DAY.fenetre(maintenant, year, month, null, day);
     }
 
     private List<ServiceDTO> servicesDeLaFenetre(User user, Fenetre fenetre, ZonedDateTime maintenant) {

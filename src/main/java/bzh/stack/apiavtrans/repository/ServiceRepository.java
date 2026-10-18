@@ -48,6 +48,17 @@ public interface ServiceRepository extends JpaRepository<Service, UUID> {
            "AND s.debut <= :instant AND (s.fin IS NULL OR s.fin >= :instant) ORDER BY s.debut DESC")
     List<Service> findServicesTravailContenant(@Param("user") User user, @Param("instant") ZonedDateTime instant);
 
+    /**
+     * Services de travail qui touchent [debut, fin[ (débutés dedans, en cours, ou terminés dedans), les plus récents d'abord.
+     * Sert à retrouver la journée de travail d'un salarié de nuit après minuit.
+     */
+    @Query("SELECT s FROM Service s WHERE s.user = :user AND s.isBreak = false " +
+           "AND s.debut < :fin AND (s.fin IS NULL OR s.fin >= :debut) ORDER BY s.debut DESC")
+    List<Service> findServicesTravailChevauchant(@Param("user") User user,
+                                                 @Param("debut") ZonedDateTime debut,
+                                                 @Param("fin") ZonedDateTime fin,
+                                                 Pageable pageable);
+
     @Query("SELECT s FROM Service s WHERE s.user = :user " +
            "AND (CAST(:isBreak AS boolean) IS NULL OR s.isBreak = :isBreak) " +
            "AND (CAST(:startDate AS timestamp) IS NULL OR s.debut >= :startDate) " +

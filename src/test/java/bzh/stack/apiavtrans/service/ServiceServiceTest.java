@@ -448,6 +448,39 @@ class ServiceServiceTest {
                 .hasMessageContaining("Invalid period");
     }
 
+    @Test
+    void should_return_yesterday_workday_when_night_service_ended_after_midnight() {
+        ZonedDateTime minuit = ZonedDateTime.now(PARIS).toLocalDate().atStartOfDay(PARIS);
+        Service nuit = closedService(minuit.minusHours(3), minuit.plusMinutes(1));
+        when(userRepository.findByEmail(employee.getEmail())).thenReturn(Optional.of(employee));
+        when(serviceRepository.findServicesTravailChevauchant(eq(employee), any(), any(), any())).thenReturn(List.of(nuit));
+        when(serviceRepository.findServicesTravail(eq(employee), any(), any())).thenReturn(List.of(nuit));
+
+        var journee = serviceService.getDailyServices(employee.getEmail());
+
+        assertThat(journee.getDate()).isEqualTo(minuit.toLocalDate().minusDays(1));
+        assertThat(journee.getAujourdhui()).isFalse();
+        assertThat(journee.getServices()).extracting(ServiceDTO::getUuid).containsExactly(nuit.getUuid());
+        assertThat(journee.getHeures().getSecondes()).isEqualTo(3 * 3600 + 60);
+    }
+
+    @Test
+    void should_use_workday_for_day_hours_when_no_date_is_given() {
+        ZonedDateTime minuit = ZonedDateTime.now(PARIS).toLocalDate().atStartOfDay(PARIS);
+        Service nuit = closedService(minuit.minusHours(3), minuit.plusMinutes(1));
+        when(userRepository.findByEmail(employee.getEmail())).thenReturn(Optional.of(employee));
+        when(serviceRepository.findServicesTravailChevauchant(eq(employee), any(), any(), any())).thenReturn(List.of(nuit));
+        when(serviceRepository.findServicesTravail(eq(employee), any(), any())).thenReturn(List.of(nuit));
+
+        var heures = serviceService.getWorkedHours(employee.getEmail(), "day", null, null, null, null);
+        var jourExplicite = serviceService.getWorkedHours(employee.getEmail(), "day", null, null, null,
+                minuit.getDayOfMonth());
+
+        assertThat(heures.getJour()).isEqualTo(minuit.toLocalDate().minusDays(1));
+        assertThat(heures.getDay().getSecondes()).isEqualTo(3 * 3600 + 60);
+        assertThat(jourExplicite.getJour()).isEqualTo(minuit.toLocalDate());
+    }
+
     private Service runningService() {
         Service enCours = new Service();
         enCours.setUuid(UUID.randomUUID());

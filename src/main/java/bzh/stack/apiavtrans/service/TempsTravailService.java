@@ -1,6 +1,7 @@
 package bzh.stack.apiavtrans.service;
 
 import bzh.stack.apiavtrans.dto.service.HeuresPeriodeDTO;
+import bzh.stack.apiavtrans.dto.service.JourneeTravailResponse;
 import bzh.stack.apiavtrans.dto.service.ServiceDTO;
 import bzh.stack.apiavtrans.entity.Service;
 import bzh.stack.apiavtrans.entity.User;
@@ -9,8 +10,10 @@ import bzh.stack.apiavtrans.repository.ServiceRepository;
 import bzh.stack.apiavtrans.service.PeriodeHeures.Fenetre;
 import bzh.stack.apiavtrans.service.TempsTravailCalculator.Bilan;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
 import java.time.ZonedDateTime;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -72,6 +75,34 @@ public class TempsTravailService {
     @Transactional(readOnly = true)
     public ServiceDTO etatActuel(User user, ZonedDateTime maintenant) {
         return serviceActif(user).map(travail -> etat(travail, maintenant)).orElse(null);
+    }
+
+    /**
+     * Journée de travail en cours : jour de début du dernier service qui touche aujourd'hui (débuté aujourd'hui,
+     * en cours, ou terminé aujourd'hui après minuit), sinon aujourd'hui. Un salarié de nuit qui a pointé
+     * de 21 h à 6 h retrouve ainsi sa journée de la veille jusqu'à son prochain service.
+     */
+    @Transactional(readOnly = true)
+    public LocalDate journeeEnCours(User user, ZonedDateTime maintenant) {
+        Fenetre aujourdhui = PeriodeHeures.DAY.fenetre(maintenant);
+        return serviceRepository.findServicesTravailChevauchant(user, aujourdhui.debut(), aujourdhui.fin(), PageRequest.of(0, 1))
+                .stream()
+                .findFirst()
+                .map(service -> service.getDebut().withZoneSameInstant(PeriodeHeures.PARIS).toLocalDate())
+                .orElse(aujourdhui.debut().toLocalDate());
+    }
+
+    /** Services de travail rattachés au jour (avec leurs pauses) et temps net de la journée, en une seule lecture. */
+    @Transactional(readOnly = true)
+    public JourneeTravailResponse journee(User user, LocalDate jour, ZonedDateTime maintenant) {
+        List<Service> travaux = servicesTravail(user, Fenetre.jours(jour, jour));
+        Map<UUID, List<Service>> pauses = pausesParService(travaux);
+        List<ServiceDTO> services = travaux.stream()
+                .map(travail -> serviceMapper.toDTO(travail, pauses.getOrDefault(travail.getUuid(), List.of()), maintenant))
+                .toList();
+        boolean aujourdhui = jour.equals(maintenant.withZoneSameInstant(PeriodeHeures.PARIS).toLocalDate());
+        return new JourneeTravailResponse(true, jour, aujourdhui,
+                versHeures(calculator.bilan(travaux, pauses, maintenant)), services, maintenant);
     }
 
     /** Statut de présence déduit du service en cours. */

@@ -7,6 +7,7 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.time.LocalDate;
 import java.time.ZonedDateTime;
 import java.util.UUID;
 
@@ -44,8 +45,11 @@ public class UserWithStatusDTO {
     @Schema(description = "Service de travail en cours avec ses pauses (si présent ou en pause)")
     private ServiceDTO activeService;
 
-    @Schema(description = "Heures travaillées nettes des services débutés aujourd'hui")
+    @Schema(description = "Heures travaillées nettes de la journée de travail en cours (celle de la veille pour un service de nuit)")
     private HeuresPeriodeDTO hoursToday;
+
+    @Schema(description = "Jour de rattachement de hoursToday", example = "2026-10-12")
+    private LocalDate journee;
 
     @Schema(description = "Instant de calcul (heure serveur)")
     private ZonedDateTime calculeLe;

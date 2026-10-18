@@ -1,5 +1,6 @@
 package bzh.stack.apiavtrans.service;
 
+import bzh.stack.apiavtrans.dto.service.JourneeTravailResponse;
 import bzh.stack.apiavtrans.dto.service.ServiceDTO;
 import bzh.stack.apiavtrans.entity.Service;
 import bzh.stack.apiavtrans.entity.User;
@@ -12,6 +13,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.util.EnumMap;
@@ -92,6 +94,59 @@ class TempsTravailServiceTest {
         assertThat(bilan.secondes()).isEqualTo(5 * 3600);
         assertThat(bilan.enCours()).isTrue();
         assertThat(TempsTravailService.versHeures(bilan).getHeures()).isEqualTo(5.0);
+    }
+
+    // ── Journée de travail (salarié de nuit après minuit) ──
+
+    @Test
+    void should_show_yesterday_night_service_when_it_ended_after_midnight() {
+        // Pointe à 21 h le 12/10, pause de 2 h à 3 h, dépointe à 6 h le 13/10 ; il est 6 h 30
+        ZonedDateTime maintenant = ZonedDateTime.of(2026, 10, 13, 6, 30, 0, 0, PARIS);
+        Service nuit = travail(ZonedDateTime.of(2026, 10, 12, 21, 0, 0, 0, PARIS),
+                ZonedDateTime.of(2026, 10, 13, 6, 0, 0, 0, PARIS));
+        Service pause = pause(nuit, ZonedDateTime.of(2026, 10, 13, 2, 0, 0, 0, PARIS),
+                ZonedDateTime.of(2026, 10, 13, 3, 0, 0, 0, PARIS));
+        PeriodeHeures.Fenetre aujourdhui = PeriodeHeures.DAY.fenetre(maintenant);
+        when(serviceRepository.findServicesTravailChevauchant(eq(chauffeur), eq(aujourdhui.debut()),
+                eq(aujourdhui.fin()), any())).thenReturn(List.of(nuit));
+        when(serviceRepository.findServicesTravail(eq(chauffeur), any(), any())).thenReturn(List.of(nuit));
+        when(serviceRepository.findPausesDe(List.of(nuit))).thenReturn(List.of(pause));
+
+        LocalDate journee = tempsTravailService.journeeEnCours(chauffeur, maintenant);
+        JourneeTravailResponse response = tempsTravailService.journee(chauffeur, journee, maintenant);
+
+        assertThat(journee).isEqualTo(LocalDate.of(2026, 10, 12));
+        assertThat(response.getDate()).isEqualTo(LocalDate.of(2026, 10, 12));
+        assertThat(response.getAujourdhui()).isFalse();
+        assertThat(response.getServices()).hasSize(1);
+        assertThat(response.getServices().get(0).getPauses()).hasSize(1);
+        assertThat(response.getHeures().getSecondes()).isEqualTo(8 * 3600);
+        assertThat(response.getHeures().getEnCours()).isFalse();
+        verify(serviceRepository).findServicesTravail(chauffeur,
+                ZonedDateTime.of(2026, 10, 12, 0, 0, 0, 0, PARIS), ZonedDateTime.of(2026, 10, 13, 0, 0, 0, 0, PARIS));
+    }
+
+    @Test
+    void should_show_yesterday_night_service_while_it_is_still_running() {
+        when(serviceRepository.findServicesTravailChevauchant(eq(chauffeur), any(), any(), any()))
+                .thenReturn(List.of(serviceDeNuit));
+
+        assertThat(tempsTravailService.journeeEnCours(chauffeur, MAINTENANT)).isEqualTo(LocalDate.of(2026, 10, 12));
+    }
+
+    @Test
+    void should_return_today_as_empty_workday_when_no_service_touches_today() {
+        when(serviceRepository.findServicesTravailChevauchant(eq(chauffeur), any(), any(), any())).thenReturn(List.of());
+        when(serviceRepository.findServicesTravail(eq(chauffeur), any(), any())).thenReturn(List.of());
+
+        LocalDate journee = tempsTravailService.journeeEnCours(chauffeur, MAINTENANT);
+        JourneeTravailResponse response = tempsTravailService.journee(chauffeur, journee, MAINTENANT);
+
+        assertThat(journee).isEqualTo(LocalDate.of(2026, 10, 13));
+        assertThat(response.getAujourdhui()).isTrue();
+        assertThat(response.getServices()).isEmpty();
+        assertThat(response.getHeures().getSecondes()).isZero();
+        verify(serviceRepository, never()).findPausesDe(any());
     }
 
     @Test

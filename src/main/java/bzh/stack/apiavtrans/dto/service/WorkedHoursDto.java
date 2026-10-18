@@ -6,6 +6,7 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.time.LocalDate;
 import java.time.ZonedDateTime;
 
 @Data
@@ -27,8 +28,12 @@ public class WorkedHoursDto {
     @Schema(description = "Heures travaillées sur la semaine ISO")
     private HeuresPeriodeDTO week;
 
-    @Schema(description = "Heures travaillées sur la journée (services débutés ce jour-là)")
+    @Schema(description = "Heures travaillées sur la journée (services débutés ce jour-là). Sans paramètre de date : "
+            + "journée de travail en cours, celle de la veille pour un service de nuit en cours ou terminé après minuit")
     private HeuresPeriodeDTO day;
+
+    @Schema(description = "Jour de la période day", example = "2026-10-12")
+    private LocalDate jour;
 
     @Schema(description = "Heures travaillées sur le mois dernier")
     private HeuresPeriodeDTO lastMonth;
