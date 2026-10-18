@@ -2,7 +2,9 @@ package bzh.stack.apiavtrans.service;
 
 import bzh.stack.apiavtrans.entity.Absence;
 import bzh.stack.apiavtrans.entity.AbsenceType;
+import bzh.stack.apiavtrans.entity.Service;
 import bzh.stack.apiavtrans.entity.User;
+import bzh.stack.apiavtrans.mapper.ServiceMapper;
 import bzh.stack.apiavtrans.repository.AbsenceRepository;
 import bzh.stack.apiavtrans.repository.ServiceRepository;
 import bzh.stack.apiavtrans.repository.SignatureRepository;
@@ -20,6 +22,8 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.io.ByteArrayInputStream;
 import java.time.LocalDate;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
 import java.util.List;
 import java.util.UUID;
 
@@ -47,8 +51,11 @@ class ExportServiceTest {
     @BeforeEach
     void setUp() {
         JoursFeriesService joursFeriesService = new JoursFeriesService();
-        exportService = new ExportService(serviceRepository, userRepository, signatureRepository, absenceRepository,
-                joursFeriesService, new HeuresAbsenceCalculator(joursFeriesService));
+        TempsTravailCalculator calculator = new TempsTravailCalculator();
+        TempsTravailService tempsTravailService = new TempsTravailService(serviceRepository, calculator,
+                new ServiceMapper(calculator));
+        exportService = new ExportService(tempsTravailService, calculator, userRepository, signatureRepository,
+                absenceRepository, joursFeriesService, new HeuresAbsenceCalculator(joursFeriesService));
 
         employe = new User();
         employe.setUuid(UUID.randomUUID());
@@ -72,7 +79,7 @@ class ExportServiceTest {
         LocalDate start = LocalDate.of(2026, 11, 1);
         LocalDate end = LocalDate.of(2026, 11, 30);
         when(userRepository.findAllById(List.of(employe.getUuid()))).thenReturn(List.of(employe));
-        when(serviceRepository.findByUserAndDebutBetween(eq(employe), any(), any())).thenReturn(List.of());
+        when(serviceRepository.findServicesTravail(eq(employe), any(), any())).thenReturn(List.of());
         when(absenceRepository.findApprovedByUserAndDateRange(employe, start.minusDays(1), end))
                 .thenReturn(List.of(absence));
         when(signatureRepository.findByUserAndDateBetweenOrderByDateDesc(eq(employe), any(), any()))
@@ -89,6 +96,103 @@ class ExportServiceTest {
             assertThat(findRow(sheet, "TOTAL DU MOIS (travail + absences + fériés)").getCell(6).getNumericCellValue())
                     .isCloseTo(35.0, within(0.005));
         }
+    }
+
+    @Test
+    void should_count_night_service_and_its_break_after_midnight_on_start_day() throws Exception {
+        // Service du 12/10 21 h au 13/10 5 h, pause le 13/10 de 1 h à 2 h → 7 h le 12/10, rien le 13/10
+        Service nuit = travail(at(12, 21, 0), at(13, 5, 0));
+        Service pause = pauseDe(nuit, at(13, 1, 0), at(13, 2, 0));
+
+        Sheet sheet = exporter(List.of(nuit), List.of(pause));
+
+        Row jour12 = findRow(sheet, "12/10/2026");
+        assertThat(jour12.getCell(6).getNumericCellValue()).isCloseTo(7.0, within(0.001));
+        assertThat(jour12.getCell(7).getStringCellValue()).contains("Fin de service le 13/10/2026");
+        assertThat(findRow(sheet, "13/10/2026").getCell(6).getCellType()).isNotEqualTo(CellType.FORMULA);
+        assertThat(findRow(sheet, "TOTAL DU MOIS").getCell(6).getNumericCellValue()).isCloseTo(7.0, within(0.001));
+    }
+
+    @Test
+    void should_not_count_gap_between_two_services_of_the_same_day() throws Exception {
+        Service matin = travail(at(12, 8, 0), at(12, 12, 0));
+        Service apresMidi = travail(at(12, 14, 0), at(12, 18, 0));
+        Service pause = pauseDe(apresMidi, at(12, 16, 0), at(12, 16, 15));
+
+        Sheet sheet = exporter(List.of(matin, apresMidi), List.of(pause));
+
+        Row jour12 = findRow(sheet, "12/10/2026");
+        assertThat(jour12.getCell(6).getNumericCellValue()).isCloseTo(7.75, within(0.001));
+        assertThat(jour12.getCell(7).getStringCellValue()).contains("2 services");
+    }
+
+    @Test
+    void should_count_and_flag_service_longer_than_twelve_hours() throws Exception {
+        Service long30h = travail(at(12, 8, 0), at(13, 14, 0));
+
+        Sheet sheet = exporter(List.of(long30h), List.of());
+
+        Row jour12 = findRow(sheet, "12/10/2026");
+        assertThat(jour12.getCell(6).getNumericCellValue()).isCloseTo(30.0, within(0.001));
+        assertThat(jour12.getCell(7).getStringCellValue()).contains("plus de 12 h");
+    }
+
+    @Test
+    void should_count_real_duration_when_night_service_spans_dst_change() throws Exception {
+        // Nuit du 24 au 25/10/2026 (on recule d'une heure) : 22 h → 6 h = 9 h réelles
+        Service nuit = travail(at(24, 22, 0), at(25, 6, 0));
+
+        Sheet sheet = exporter(List.of(nuit), List.of());
+
+        assertThat(findRow(sheet, "24/10/2026").getCell(6).getNumericCellValue()).isCloseTo(9.0, within(0.001));
+    }
+
+    @Test
+    void should_grey_out_days_fully_covered_by_a_multi_day_service() throws Exception {
+        Service troisJours = travail(at(12, 8, 0), at(14, 10, 0));
+
+        Sheet sheet = exporter(List.of(troisJours), List.of());
+
+        assertThat(findRow(sheet, "13/10/2026").getCell(7).getStringCellValue()).isEqualTo("Suite du service du 12/10/2026");
+        assertThat(findRow(sheet, "14/10/2026").getCell(7).getStringCellValue()).isEmpty();
+    }
+
+    private Sheet exporter(List<Service> travaux, List<Service> pauses) throws Exception {
+        LocalDate start = LocalDate.of(2026, 10, 1);
+        LocalDate end = LocalDate.of(2026, 10, 31);
+        when(userRepository.findAllById(List.of(employe.getUuid()))).thenReturn(List.of(employe));
+        when(serviceRepository.findServicesTravail(eq(employe), any(), any())).thenReturn(travaux);
+        if (!travaux.isEmpty()) {
+            when(serviceRepository.findPausesDe(any())).thenReturn(pauses);
+        }
+        when(absenceRepository.findApprovedByUserAndDateRange(employe, start.minusDays(1), end)).thenReturn(List.of());
+        when(signatureRepository.findByUserAndDateBetweenOrderByDateDesc(eq(employe), any(), any()))
+                .thenReturn(List.of());
+
+        byte[] bytes = exportService.exportWorkedHoursToExcel(List.of(employe.getUuid()), start, end);
+        XSSFWorkbook workbook = new XSSFWorkbook(new ByteArrayInputStream(bytes));
+        return workbook.getSheetAt(0);
+    }
+
+    private Service travail(ZonedDateTime debut, ZonedDateTime fin) {
+        Service service = new Service();
+        service.setUuid(UUID.randomUUID());
+        service.setUser(employe);
+        service.setDebut(debut);
+        service.setFin(fin);
+        service.setIsBreak(false);
+        return service;
+    }
+
+    private Service pauseDe(Service parent, ZonedDateTime debut, ZonedDateTime fin) {
+        Service pause = travail(debut, fin);
+        pause.setIsBreak(true);
+        pause.setServiceParent(parent);
+        return pause;
+    }
+
+    private static ZonedDateTime at(int jourOctobre, int heure, int minute) {
+        return ZonedDateTime.of(2026, 10, jourOctobre, heure, minute, 0, 0, ZoneId.of("Europe/Paris"));
     }
 
     private static Row findRow(Sheet sheet, String firstCell) {

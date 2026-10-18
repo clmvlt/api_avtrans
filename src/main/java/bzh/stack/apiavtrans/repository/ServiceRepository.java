@@ -19,8 +19,6 @@ import java.util.UUID;
 @Repository
 public interface ServiceRepository extends JpaRepository<Service, UUID> {
 
-    List<Service> findByUserAndDebutBetween(User user, ZonedDateTime start, ZonedDateTime end);
-
     /** Services de travail (hors pauses) débutés dans [debut, fin[. */
     @Query("SELECT s FROM Service s WHERE s.user = :user AND s.isBreak = false " +
            "AND s.debut >= :debut AND s.debut < :fin ORDER BY s.debut ASC")

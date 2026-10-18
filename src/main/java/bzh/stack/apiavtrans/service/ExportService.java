@@ -5,7 +5,6 @@ import bzh.stack.apiavtrans.entity.AbsenceType;
 import bzh.stack.apiavtrans.entity.Signature;
 import bzh.stack.apiavtrans.entity.User;
 import bzh.stack.apiavtrans.repository.AbsenceRepository;
-import bzh.stack.apiavtrans.repository.ServiceRepository;
 import bzh.stack.apiavtrans.repository.SignatureRepository;
 import bzh.stack.apiavtrans.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
@@ -21,7 +20,9 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.text.Normalizer;
 import java.time.DayOfWeek;
+import java.time.Duration;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.YearMonth;
@@ -34,7 +35,8 @@ import java.util.*;
 @RequiredArgsConstructor
 public class ExportService {
 
-    private final ServiceRepository serviceRepository;
+    private final TempsTravailService tempsTravailService;
+    private final TempsTravailCalculator tempsTravailCalculator;
     private final UserRepository userRepository;
     private final SignatureRepository signatureRepository;
     private final AbsenceRepository absenceRepository;
@@ -51,6 +53,9 @@ public class ExportService {
     /** Dernière colonne du tableau (K) : heures créditées par les absences et les jours fériés. */
     private static final int LAST_COLUMN = COLUMN_HEADERS.length - 1;
     private static final int CREDIT_COLUMN = 10;
+
+    /** Au-delà, un service est signalé « à vérifier » (oubli de dépointage probable). */
+    private static final long LONG_SERVICE_SECONDS = 12 * 3600;
 
     private static final String[] FR_DAYS_SHORT = {"Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"};
 
@@ -121,7 +126,6 @@ public class ExportService {
         CellStyle timeStyle = createTimeStyle(workbook);
         CellStyle greyedStyle = createGreyedStyle(workbook);
         CellStyle excelTimeStyle = createExcelTimeStyle(workbook);
-        CellStyle excelGreyedTimeStyle = createExcelGreyedTimeStyle(workbook);
         CellStyle numberStyle = createNumberStyle(workbook);
         CellStyle greyedNumberStyle = createGreyedNumberStyle(workbook);
         CellStyle weekendDataStyle = createWeekendDataStyle(workbook);
@@ -155,79 +159,61 @@ public class ExportService {
         sheet.addMergedRegion(new CellRangeAddress(1, 1, 0, LAST_COLUMN));
 
         // ── Traitement des services ──
-        ZonedDateTime startDateTime = startDate.atStartOfDay(PARIS_ZONE);
-        ZonedDateTime endDateTime = endDate.plusDays(1).atStartOfDay(PARIS_ZONE);
-
-        List<bzh.stack.apiavtrans.entity.Service> services = serviceRepository
-                .findByUserAndDebutBetween(user, startDateTime, endDateTime);
+        // Un service compte en entier, pauses déduites, sur son jour de début (même règle que l'API) :
+        // un service de nuit ou de plusieurs jours n'est jamais réparti entre deux lignes.
+        ZonedDateTime maintenant = ZonedDateTime.now(PARIS_ZONE);
+        List<bzh.stack.apiavtrans.entity.Service> workServices = tempsTravailService.servicesTravail(
+                user, PeriodeHeures.Fenetre.jours(startDate, endDate));
+        Map<UUID, List<bzh.stack.apiavtrans.entity.Service>> pausesParService =
+                tempsTravailService.pausesParService(workServices);
 
         Map<LocalDate, DayData> dayDataMap = new HashMap<>();
-        List<bzh.stack.apiavtrans.entity.Service> workServices = new ArrayList<>();
 
-        for (bzh.stack.apiavtrans.entity.Service service : services) {
-            if (!service.getIsBreak()) {
-                workServices.add(service);
-            }
-        }
-
-        for (bzh.stack.apiavtrans.entity.Service service : services) {
-            LocalDate serviceStartDate = service.getDebut().withZoneSameInstant(PARIS_ZONE).toLocalDate();
-            LocalDate serviceEndDate = service.getFin() != null
-                ? service.getFin().withZoneSameInstant(PARIS_ZONE).toLocalDate()
-                : serviceStartDate;
-
-            if (service.getIsBreak()) {
-                LocalDate breakDayToUse = findDayForBreak(service, workServices);
-                DayData dayData = dayDataMap.computeIfAbsent(breakDayToUse, k -> new DayData());
-                if (service.getDebut() != null && service.getFin() != null) {
-                    dayData.breaks.add(new BreakPeriod(service.getDebut(), service.getFin()));
-                }
-            } else {
-                DayData startDayData = dayDataMap.computeIfAbsent(serviceStartDate, k -> new DayData());
-                if (startDayData.workStart == null || service.getDebut().isBefore(startDayData.workStart)) {
-                    startDayData.workStart = service.getDebut();
-                }
-
-                if (service.getFin() != null) {
-                    if (serviceStartDate.equals(serviceEndDate)) {
-                        if (startDayData.workEnd == null || service.getFin().isAfter(startDayData.workEnd)) {
-                            startDayData.workEnd = service.getFin();
-                        }
-                    } else {
-                        long hoursBetween = ChronoUnit.HOURS.between(service.getDebut(), service.getFin());
-                        boolean isNightShift = hoursBetween <= 12 && serviceEndDate.equals(serviceStartDate.plusDays(1));
-
-                        if (isNightShift) {
-                            if (startDayData.workEnd == null || service.getFin().isAfter(startDayData.workEnd)) {
-                                startDayData.workEnd = service.getFin();
-                            }
-                            startDayData.isNightShift = true;
-                            startDayData.nightShiftEndDate = serviceEndDate;
-                        } else {
-                            startDayData.isMultiDayStart = true;
-
-                            DayData endDayData = dayDataMap.computeIfAbsent(serviceEndDate, k -> new DayData());
-                            if (endDayData.workEnd == null || service.getFin().isAfter(endDayData.workEnd)) {
-                                endDayData.workEnd = service.getFin();
-                            }
-                            endDayData.isMultiDayEnd = true;
-
-                            LocalDate betweenDate = serviceStartDate.plusDays(1);
-                            while (betweenDate.isBefore(serviceEndDate)) {
-                                DayData betweenDayData = dayDataMap.computeIfAbsent(betweenDate, k -> new DayData());
-                                betweenDayData.isMultiDayService = true;
-                                betweenDate = betweenDate.plusDays(1);
-                            }
-                        }
-                    }
-                } else {
-                    startDayData.hasIncomplete = true;
-                }
+        for (bzh.stack.apiavtrans.entity.Service service : workServices) {
+            LocalDate serviceStartDate = toParisDate(service.getDebut());
+            DayData dayData = dayDataMap.computeIfAbsent(serviceStartDate, k -> new DayData());
+            if (dayData.workStart == null || service.getDebut().isBefore(dayData.workStart)) {
+                dayData.workStart = service.getDebut();
             }
 
             if (service.getFin() == null) {
-                DayData dayData = dayDataMap.computeIfAbsent(serviceStartDate, k -> new DayData());
                 dayData.hasIncomplete = true;
+                continue;
+            }
+
+            List<bzh.stack.apiavtrans.entity.Service> pauses =
+                    pausesParService.getOrDefault(service.getUuid(), List.of());
+            dayData.closedServices++;
+            dayData.netSeconds += tempsTravailCalculator.dureeTravail(service, pauses, maintenant);
+            if (dayData.workEnd == null || service.getFin().isAfter(dayData.workEnd)) {
+                dayData.workEnd = service.getFin();
+            }
+            if (Duration.between(service.getDebut(), service.getFin()).getSeconds() > LONG_SERVICE_SECONDS) {
+                dayData.hasLongService = true;
+            }
+
+            // Pauses affichées dans les bornes du service (comme dans le calcul)
+            for (bzh.stack.apiavtrans.entity.Service pause : pauses) {
+                if (pause.getFin() == null) {
+                    continue;
+                }
+                ZonedDateTime breakStart = pause.getDebut().isBefore(service.getDebut()) ? service.getDebut() : pause.getDebut();
+                ZonedDateTime breakEnd = pause.getFin().isAfter(service.getFin()) ? service.getFin() : pause.getFin();
+                if (breakEnd.isAfter(breakStart)) {
+                    dayData.breaks.add(new BreakPeriod(breakStart, breakEnd));
+                }
+            }
+
+            LocalDate serviceEndDate = toParisDate(service.getFin());
+            if (serviceEndDate.isAfter(serviceStartDate)) {
+                if (dayData.serviceEndDate == null || serviceEndDate.isAfter(dayData.serviceEndDate)) {
+                    dayData.serviceEndDate = serviceEndDate;
+                }
+                // Jours entièrement couverts par le service : ligne grisée, sans heures
+                for (LocalDate d = serviceStartDate.plusDays(1); d.isBefore(serviceEndDate); d = d.plusDays(1)) {
+                    DayData between = dayDataMap.computeIfAbsent(d, k -> new DayData());
+                    between.continuationOf = serviceStartDate;
+                }
             }
         }
 
@@ -250,7 +236,7 @@ public class ExportService {
         // ── Heures créditées par jour (absences approuvées + fériés chômés), hors heures travaillées ──
         Set<LocalDate> joursTravailles = new HashSet<>();
         for (bzh.stack.apiavtrans.entity.Service service : workServices) {
-            joursTravailles.add(service.getDebut().withZoneSameInstant(PARIS_ZONE).toLocalDate());
+            joursTravailles.add(toParisDate(service.getDebut()));
         }
         HeuresAbsenceCalculator.CreditsPeriode credits = heuresAbsenceCalculator.crediterPeriode(
                 user, approvedAbsences, startDate, endDate, joursTravailles);
@@ -357,11 +343,11 @@ public class ExportService {
                 }
                 writeAbsenceCell(workbook, styleCache, row, absenceText, conflict, typeHex,
                         currentDataStyle, baseKey);
-            } else if (dayData.isMultiDayService) {
+            } else if (dayData.isContinuationOnly()) {
                 for (int i = 2; i <= 8; i++) {
                     Cell cell = row.createCell(i);
                     if (i == 7) {
-                        cell.setCellValue("Service en cours sur plusieurs jours");
+                        cell.setCellValue("Suite du service du " + dayData.continuationOf.format(dateFormatter));
                     } else {
                         cell.setCellValue("");
                     }
@@ -370,15 +356,14 @@ public class ExportService {
                 writeAbsenceCell(workbook, styleCache, row, absenceText, conflict, typeHex,
                         greyedStyle, "grey");
             } else {
-                boolean isMultiDay = dayData.isMultiDayStart || dayData.isMultiDayEnd;
-                CellStyle cellStyleToUse = isMultiDay ? greyedStyle : (isHoliday ? holidayDataStyle : (isWeekend ? weekendDataStyle : timeStyle));
-                CellStyle dataCellStyleToUse = isMultiDay ? greyedStyle : currentDataStyle;
-                CellStyle excelTimeStyleToUse = isMultiDay ? excelGreyedTimeStyle : currentExcelTime;
-                CellStyle numberStyleToUse = isMultiDay ? greyedNumberStyle : currentNumber;
+                CellStyle cellStyleToUse = isHoliday ? holidayDataStyle : (isWeekend ? weekendDataStyle : timeStyle);
+                CellStyle dataCellStyleToUse = currentDataStyle;
+                CellStyle excelTimeStyleToUse = currentExcelTime;
+                CellStyle numberStyleToUse = currentNumber;
 
                 Cell startCell = row.createCell(2);
                 if (dayData.workStart != null) {
-                    startCell.setCellValue(java.util.Date.from(dayData.workStart.toInstant()));
+                    startCell.setCellValue(toParisDateTime(dayData.workStart));
                     startCell.setCellStyle(excelTimeStyleToUse);
                 } else {
                     startCell.setCellValue("");
@@ -401,9 +386,9 @@ public class ExportService {
                         }
                     }
 
-                    breakStartCell.setCellValue(java.util.Date.from(longestBreak.start.toInstant()));
+                    breakStartCell.setCellValue(toParisDateTime(longestBreak.start));
                     breakStartCell.setCellStyle(excelTimeStyleToUse);
-                    breakEndCell.setCellValue(java.util.Date.from(longestBreak.end.toInstant()));
+                    breakEndCell.setCellValue(toParisDateTime(longestBreak.end));
                     breakEndCell.setCellStyle(excelTimeStyleToUse);
                 } else {
                     breakStartCell.setCellValue("");
@@ -414,7 +399,7 @@ public class ExportService {
 
                 Cell endCell = row.createCell(5);
                 if (dayData.workEnd != null) {
-                    endCell.setCellValue(java.util.Date.from(dayData.workEnd.toInstant()));
+                    endCell.setCellValue(toParisDateTime(dayData.workEnd));
                     endCell.setCellStyle(excelTimeStyleToUse);
                 } else {
                     endCell.setCellValue("");
@@ -429,14 +414,23 @@ public class ExportService {
                 hoursCell.setCellStyle(numberStyleToUse);
 
                 Cell infoCell = row.createCell(7);
-                String infoText = "";
-                if (dayData.isMultiDayStart || dayData.isMultiDayEnd) {
-                    infoText = "Service s'étend sur plusieurs jours";
-                } else if (dayData.isNightShift && dayData.nightShiftEndDate != null) {
-                    infoText = "Fin de service le " + dayData.nightShiftEndDate.format(dateFormatter);
-                } else if (dayData.hasIncomplete) {
-                    infoText = "Pointage présent mais incomplet.";
+                List<String> infos = new ArrayList<>();
+                if (dayData.serviceEndDate != null) {
+                    infos.add("Fin de service le " + dayData.serviceEndDate.format(dateFormatter));
                 }
+                if (dayData.hasLongService) {
+                    infos.add("⚠ Service de plus de 12 h : à vérifier");
+                }
+                if (dayData.closedServices > 1) {
+                    infos.add(dayData.closedServices + " services (interruptions déduites)");
+                }
+                if (dayData.hasIncomplete) {
+                    infos.add("Pointage présent mais incomplet.");
+                }
+                if (dayData.continuationOf != null) {
+                    infos.add("Suite du service du " + dayData.continuationOf.format(dateFormatter));
+                }
+                String infoText = String.join(" — ", infos);
                 if (isHoliday) {
                     infoText = (infoText.isEmpty() ? "" : infoText + " — ") + "Férié : " + holidayName;
                 }
@@ -470,12 +464,11 @@ public class ExportService {
                     otherBreaksCell.setCellStyle(dataCellStyleToUse);
                 }
 
-                String workedBaseKey = isMultiDay ? "grey" : baseKey;
                 writeAbsenceCell(workbook, styleCache, row, absenceText, conflict, typeHex,
-                        dataCellStyleToUse, workedBaseKey);
+                        dataCellStyleToUse, baseKey);
             }
 
-            CellStyle creditStyle = dayData != null && dayData.isMultiDayService ? greyedNumberStyle : currentNumber;
+            CellStyle creditStyle = dayData != null && dayData.isContinuationOnly() ? greyedNumberStyle : currentNumber;
             writeCreditCell(row, credits.jours().get(currentDate), creditStyle);
 
             currentDate = currentDate.plusDays(1);
@@ -763,12 +756,14 @@ public class ExportService {
         rowNum = legendItem(sheet, rowNum, weekendStyle, "Week-end");
         rowNum = legendItem(sheet, rowNum, holidayStyle, "Jour férié");
         rowNum = legendItem(sheet, rowNum, greyedStyle,
-                "Service sur plusieurs jours (heures non comptées ce jour-là)");
+                "Suite d'un service commencé un jour précédent (heures comptées le jour de début)");
         CellStyle conflictSample = buildAbsenceStyle(workbook, styleCache, null, false, true);
         rowNum = legendItem(sheet, rowNum, conflictSample,
                 "Conflit : pointage et absence le même jour (à vérifier)");
         rowNum = legendText(sheet, rowNum,
-                "« Pointage présent mais incomplet » : service sans heure de fin");
+                "Un service compte en entier, pauses déduites, sur son jour de début (y compris un service de nuit)");
+        rowNum = legendText(sheet, rowNum,
+                "« Pointage présent mais incomplet » : service sans heure de fin (non compté)");
         rowNum = legendText(sheet, rowNum,
                 "Colonne « Absence » : la cellule reprend la couleur du type d'absence");
         rowNum = legendText(sheet, rowNum,
@@ -803,31 +798,41 @@ public class ExportService {
 
     // ── Formules ──
 
+    /**
+     * ROUND(((F-C)-(E-D)-K)*24, 2) : amplitude de la journée moins la pause principale, moins une constante K
+     * (autres pauses, interruptions entre services, changement d'heure) calculée pour que le résultat soit
+     * exactement le temps net de l'API. Modifier les heures dans Excel recalcule toujours le total.
+     */
     private String buildHoursFormula(int excelRow, DayData dayData, BreakPeriod longestBreak) {
         String formula = "ROUND(((F" + excelRow + "-C" + excelRow + ")";
 
+        long wallSeconds = wallSeconds(dayData.workStart, dayData.workEnd);
         if (longestBreak != null) {
             formula += "-(E" + excelRow + "-D" + excelRow + ")";
+            wallSeconds -= wallSeconds(longestBreak.start, longestBreak.end);
         }
 
-        if (dayData.breaks.size() > 1) {
-            long otherBreaksMinutes = 0;
-
-            for (BreakPeriod breakPeriod : dayData.breaks) {
-                if (breakPeriod != longestBreak) {
-                    long duration = ChronoUnit.MINUTES.between(breakPeriod.start, breakPeriod.end);
-                    otherBreaksMinutes += duration;
-                }
-            }
-
-            if (otherBreaksMinutes > 0) {
-                double otherBreaksDays = otherBreaksMinutes / 1440.0;
-                formula += "-" + String.format(Locale.US, "%.10f", otherBreaksDays);
-            }
+        long correctionSeconds = wallSeconds - dayData.netSeconds;
+        if (correctionSeconds != 0) {
+            double correctionDays = Math.abs(correctionSeconds) / 86400.0;
+            formula += (correctionSeconds > 0 ? "-" : "+") + String.format(Locale.US, "%.10f", correctionDays);
         }
 
         formula += ")*24,2)";
         return formula;
+    }
+
+    /** Écart en secondes entre deux heures murales de Paris, tel qu'Excel le calcule. */
+    private static long wallSeconds(ZonedDateTime start, ZonedDateTime end) {
+        return Duration.between(toParisDateTime(start), toParisDateTime(end)).getSeconds();
+    }
+
+    private static LocalDateTime toParisDateTime(ZonedDateTime instant) {
+        return instant.withZoneSameInstant(PARIS_ZONE).toLocalDateTime().withNano(0);
+    }
+
+    private static LocalDate toParisDate(ZonedDateTime instant) {
+        return instant.withZoneSameInstant(PARIS_ZONE).toLocalDate();
     }
 
     // ── Styles ──
@@ -910,20 +915,6 @@ public class ExportService {
         style.setBorderLeft(BorderStyle.THIN);
         style.setBorderRight(BorderStyle.THIN);
         style.setDataFormat(workbook.createDataFormat().getFormat("HH:mm:ss"));
-        return style;
-    }
-
-    private CellStyle createExcelGreyedTimeStyle(Workbook workbook) {
-        CellStyle style = workbook.createCellStyle();
-        style.setAlignment(HorizontalAlignment.CENTER);
-        style.setVerticalAlignment(VerticalAlignment.CENTER);
-        style.setBorderBottom(BorderStyle.THIN);
-        style.setBorderTop(BorderStyle.THIN);
-        style.setBorderLeft(BorderStyle.THIN);
-        style.setBorderRight(BorderStyle.THIN);
-        style.setDataFormat(workbook.createDataFormat().getFormat("HH:mm:ss"));
-        style.setFillForegroundColor(IndexedColors.GREY_40_PERCENT.getIndex());
-        style.setFillPattern(FillPatternType.SOLID_FOREGROUND);
         return style;
     }
 
@@ -1282,34 +1273,27 @@ public class ExportService {
         return cleaned.isEmpty() ? "salarie" : cleaned;
     }
 
-    private LocalDate findDayForBreak(bzh.stack.apiavtrans.entity.Service breakService,
-                                      List<bzh.stack.apiavtrans.entity.Service> workServices) {
-        ZonedDateTime breakStart = breakService.getDebut();
-        LocalDate breakStartDate = breakStart.withZoneSameInstant(PARIS_ZONE).toLocalDate();
-
-        for (bzh.stack.apiavtrans.entity.Service workService : workServices) {
-            if (workService.getFin() != null) {
-                if (!breakStart.isBefore(workService.getDebut()) && !breakStart.isAfter(workService.getFin())) {
-                    return workService.getDebut().withZoneSameInstant(PARIS_ZONE).toLocalDate();
-                }
-            }
-        }
-
-        return breakStartDate;
-    }
-
     // ── Classes internes ──
 
     private static class DayData {
+        /** Début du premier service débuté ce jour-là. */
         ZonedDateTime workStart;
+        /** Fin du dernier service terminé débuté ce jour-là (éventuellement le lendemain). */
         ZonedDateTime workEnd;
         List<BreakPeriod> breaks = new ArrayList<>();
+        /** Temps net des services terminés débutés ce jour-là (pauses déduites). */
+        long netSeconds;
+        int closedServices;
         boolean hasIncomplete = false;
-        boolean isMultiDayService = false;
-        boolean isMultiDayStart = false;
-        boolean isMultiDayEnd = false;
-        boolean isNightShift = false;
-        LocalDate nightShiftEndDate = null;
+        boolean hasLongService = false;
+        /** Jour de fin du service quand il se termine un autre jour. */
+        LocalDate serviceEndDate;
+        /** Jour de début du service qui couvre entièrement ce jour. */
+        LocalDate continuationOf;
+
+        boolean isContinuationOnly() {
+            return continuationOf != null && workStart == null;
+        }
     }
 
     private static class BreakPeriod {
