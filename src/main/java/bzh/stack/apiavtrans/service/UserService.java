@@ -6,6 +6,7 @@ import bzh.stack.apiavtrans.dto.common.UserDTO;
 import bzh.stack.apiavtrans.dto.common.UserLastVehicleDTO;
 import bzh.stack.apiavtrans.dto.common.UserWithStatusDTO;
 import bzh.stack.apiavtrans.dto.common.UserHoursDTO;
+import bzh.stack.apiavtrans.dto.service.ServiceDTO;
 import bzh.stack.apiavtrans.dto.common.UserWithHoursDTO;
 import bzh.stack.apiavtrans.dto.common.UsersHoursListResponse;
 import bzh.stack.apiavtrans.entity.Absence;
@@ -16,7 +17,6 @@ import bzh.stack.apiavtrans.entity.VehiculeKilometrage;
 import bzh.stack.apiavtrans.mapper.VehiculeKilometrageMapper;
 import bzh.stack.apiavtrans.entity.Role;
 import bzh.stack.apiavtrans.entity.User;
-import bzh.stack.apiavtrans.mapper.ServiceMapper;
 import bzh.stack.apiavtrans.mapper.UserMapper;
 import bzh.stack.apiavtrans.repository.AbsenceRepository;
 import bzh.stack.apiavtrans.repository.AcompteRepository;
@@ -48,10 +48,10 @@ import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.util.ArrayList;
-import java.util.HashSet;
+import java.util.EnumMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 import java.util.UUID;
 
 @Service
@@ -79,7 +79,7 @@ public class UserService {
     private final CarteRepository carteRepository;
     private final UserMapper userMapper;
     private final HeuresAbsenceCalculator heuresAbsenceCalculator;
-    private final ServiceMapper serviceMapper;
+    private final TempsTravailService tempsTravailService;
     private final VehiculeKilometrageMapper vehiculeKilometrageMapper;
     private final EmailService emailService;
 
@@ -131,7 +131,8 @@ public class UserService {
 
         // Delete all related data
         serviceModificationRepository.deleteByUser(user);
-        serviceRepository.deleteByUser(user);
+        serviceRepository.deletePausesByUser(user);
+        serviceRepository.deleteServicesByUser(user);
         emailVerificationRepository.deleteByUser(user);
         passwordResetTokenRepository.deleteByUser(user);
         absenceRepository.deleteByUser(user);
@@ -243,27 +244,15 @@ public class UserService {
     /**
      * Récupérer tous les utilisateurs avec leur statut de présence (sans heures), y compris les utilisateurs non visibles
      */
+    @Transactional(readOnly = true)
     public List<UserDTO> getAllUsersWithStatusOnly() {
         List<User> users = userRepository.findAllByOrderByLastNameAscFirstNameAsc();
         List<UserDTO> result = new ArrayList<>();
+        ZonedDateTime now = ZonedDateTime.now(ZoneId.of("Europe/Paris"));
 
         for (User user : users) {
             UserDTO dto = userMapper.toDTO(user);
-
-            Optional<bzh.stack.apiavtrans.entity.Service> activeService =
-                serviceRepository.findFirstByUserAndFinIsNullOrderByDebutDesc(user);
-
-            if (activeService.isPresent()) {
-                bzh.stack.apiavtrans.entity.Service service = activeService.get();
-                if (service.getIsBreak()) {
-                    dto.setStatus("ON_BREAK");
-                } else {
-                    dto.setStatus("PRESENT");
-                }
-            } else {
-                dto.setStatus("ABSENT");
-            }
-
+            dto.setStatus(TempsTravailService.statut(tempsTravailService.etatActuel(user, now)));
             result.add(dto);
         }
 
@@ -273,42 +262,14 @@ public class UserService {
     /**
      * Récupérer tous les utilisateurs visibles avec leur statut de présence et heures travaillées
      */
+    @Transactional(readOnly = true)
     public List<UserWithStatusDTO> getAllUsersWithStatus() {
         List<User> users = userRepository.findAllByIsVisibleTrueOrderByLastNameAscFirstNameAsc();
         List<UserWithStatusDTO> result = new ArrayList<>();
         ZonedDateTime now = ZonedDateTime.now(ZoneId.of("Europe/Paris"));
 
         for (User user : users) {
-            UserWithStatusDTO dto = new UserWithStatusDTO();
-            var userDTO = userMapper.toDTO(user);
-            dto.setUuid(user.getUuid());
-            dto.setEmail(user.getEmail());
-            dto.setFirstName(user.getFirstName());
-            dto.setLastName(user.getLastName());
-            dto.setRole(userDTO.getRole());
-            dto.setPictureUrl(userDTO.getPictureUrl());
-            dto.setIsCouchette(user.getIsCouchette());
-
-            Optional<bzh.stack.apiavtrans.entity.Service> activeService =
-                serviceRepository.findFirstByUserAndFinIsNullOrderByDebutDesc(user);
-
-            if (activeService.isPresent()) {
-                bzh.stack.apiavtrans.entity.Service service = activeService.get();
-                dto.setActiveService(serviceMapper.toDTO(service));
-
-                if (service.getIsBreak()) {
-                    dto.setStatus("ON_BREAK");
-                } else {
-                    dto.setStatus("PRESENT");
-                }
-            } else {
-                dto.setStatus("ABSENT");
-                dto.setActiveService(null);
-            }
-
-            dto.setHoursToday(calculateHoursForPeriod(user, now, "day"));
-
-            result.add(dto);
+            result.add(buildUserWithStatus(user, now));
         }
 
         return result;
@@ -317,11 +278,14 @@ public class UserService {
     /**
      * Récupérer le statut d'un utilisateur spécifique par UUID
      */
+    @Transactional(readOnly = true)
     public UserWithStatusDTO getUserStatusByUuid(UUID userUuid) {
         User user = userRepository.findById(userUuid)
                 .orElseThrow(() -> new RuntimeException("Utilisateur non trouvé"));
-        ZonedDateTime now = ZonedDateTime.now(ZoneId.of("Europe/Paris"));
+        return buildUserWithStatus(user, ZonedDateTime.now(ZoneId.of("Europe/Paris")));
+    }
 
+    private UserWithStatusDTO buildUserWithStatus(User user, ZonedDateTime now) {
         UserWithStatusDTO dto = new UserWithStatusDTO();
         var userDTO = userMapper.toDTO(user);
         dto.setUuid(user.getUuid());
@@ -332,24 +296,12 @@ public class UserService {
         dto.setPictureUrl(userDTO.getPictureUrl());
         dto.setIsCouchette(user.getIsCouchette());
 
-        Optional<bzh.stack.apiavtrans.entity.Service> activeService =
-                serviceRepository.findFirstByUserAndFinIsNullOrderByDebutDesc(user);
-
-        if (activeService.isPresent()) {
-            bzh.stack.apiavtrans.entity.Service service = activeService.get();
-            dto.setActiveService(serviceMapper.toDTO(service));
-
-            if (service.getIsBreak()) {
-                dto.setStatus("ON_BREAK");
-            } else {
-                dto.setStatus("PRESENT");
-            }
-        } else {
-            dto.setStatus("ABSENT");
-            dto.setActiveService(null);
-        }
-
-        dto.setHoursToday(calculateHoursForPeriod(user, now, "day"));
+        ServiceDTO activeService = tempsTravailService.etatActuel(user, now);
+        dto.setActiveService(activeService);
+        dto.setStatus(TempsTravailService.statut(activeService));
+        dto.setHoursToday(TempsTravailService.versHeures(
+                tempsTravailService.bilan(user, PeriodeHeures.DAY.fenetre(now), now)));
+        dto.setCalculeLe(now);
 
         return dto;
     }
@@ -361,95 +313,29 @@ public class UserService {
 
         ZonedDateTime now = ZonedDateTime.now(ZoneId.of("Europe/Paris"));
 
+        Map<PeriodeHeures, PeriodeHeures.Fenetre> fenetres = new EnumMap<>(PeriodeHeures.class);
+        for (PeriodeHeures periode : PeriodeHeures.values()) {
+            fenetres.put(periode, periode.fenetre(now));
+        }
+
         for (User user : allUsers) {
             UserDTO userDTO = userMapper.toDTO(user);
+            userDTO.setStatus(TempsTravailService.statut(tempsTravailService.etatActuel(user, now)));
 
-            Optional<bzh.stack.apiavtrans.entity.Service> activeService =
-                serviceRepository.findFirstByUserAndFinIsNullOrderByDebutDesc(user);
-
-            if (activeService.isPresent()) {
-                bzh.stack.apiavtrans.entity.Service service = activeService.get();
-                if (service.getIsBreak()) {
-                    userDTO.setStatus("ON_BREAK");
-                } else {
-                    userDTO.setStatus("PRESENT");
-                }
-            } else {
-                userDTO.setStatus("ABSENT");
-            }
-
-            double hoursDay = calculateHoursForPeriod(user, now, "day");
-            double hoursWeek = calculateHoursForPeriod(user, now, "week");
-            double hoursMonth = calculateHoursForPeriod(user, now, "month");
-            double hoursYear = calculateHoursForPeriod(user, now, "year");
-            double hoursLastMonth = calculateHoursForPeriod(user, now, "lastmonth");
-
-            UserHoursDTO hoursDTO = new UserHoursDTO(hoursDay, hoursWeek, hoursMonth, hoursYear, hoursLastMonth);
+            Map<PeriodeHeures, TempsTravailCalculator.Bilan> bilans = tempsTravailService.bilans(user, fenetres, now);
+            UserHoursDTO hoursDTO = new UserHoursDTO(
+                    TempsTravailService.versHeures(bilans.get(PeriodeHeures.DAY)),
+                    TempsTravailService.versHeures(bilans.get(PeriodeHeures.WEEK)),
+                    TempsTravailService.versHeures(bilans.get(PeriodeHeures.MONTH)),
+                    TempsTravailService.versHeures(bilans.get(PeriodeHeures.YEAR)),
+                    TempsTravailService.versHeures(bilans.get(PeriodeHeures.LASTMONTH)),
+                    now);
             usersWithHours.add(new UserWithHoursDTO(userDTO, hoursDTO));
         }
 
         return new UsersHoursListResponse(true,
                 "Tous les utilisateurs avec leurs heures récupérés avec succès",
                 usersWithHours);
-    }
-
-    private double calculateHoursForPeriod(User user, ZonedDateTime now, String period) {
-        ZonedDateTime start;
-        ZonedDateTime end;
-
-        switch (period.toLowerCase()) {
-            case "day":
-                start = now.toLocalDate().atStartOfDay(ZoneId.of("Europe/Paris"));
-                end = start.plusDays(1).minusNanos(1);
-                break;
-            case "week":
-                start = now.with(java.time.temporal.WeekFields.ISO.dayOfWeek(), 1)
-                        .toLocalDate().atStartOfDay(ZoneId.of("Europe/Paris"));
-                end = start.plusWeeks(1).minusNanos(1);
-                break;
-            case "month":
-                start = ZonedDateTime.of(now.getYear(), now.getMonthValue(), 1, 0, 0, 0, 0, ZoneId.of("Europe/Paris"));
-                end = start.plusMonths(1).minusNanos(1);
-                break;
-            case "year":
-                start = ZonedDateTime.of(now.getYear(), 1, 1, 0, 0, 0, 0, ZoneId.of("Europe/Paris"));
-                end = start.plusYears(1).minusNanos(1);
-                break;
-            case "lastmonth":
-                ZonedDateTime firstDayOfCurrentMonth = ZonedDateTime.of(now.getYear(), now.getMonthValue(), 1, 0, 0, 0, 0, ZoneId.of("Europe/Paris"));
-                start = firstDayOfCurrentMonth.minusMonths(1);
-                end = firstDayOfCurrentMonth.minusNanos(1);
-                break;
-            default:
-                return 0.0;
-        }
-
-        List<bzh.stack.apiavtrans.entity.Service> services =
-                serviceRepository.findByUserAndDebutBetween(user, start, end);
-
-        long totalSeconds = 0;
-        for (bzh.stack.apiavtrans.entity.Service service : services) {
-            long duration = calculateServiceDuration(service, now);
-            if (duration > 0) {
-                if (service.getIsBreak()) {
-                    totalSeconds -= duration;
-                } else {
-                    totalSeconds += duration;
-                }
-            }
-        }
-
-        double hours = totalSeconds / 3600.0;
-        return Math.round(hours * 100.0) / 100.0;
-    }
-
-    private long calculateServiceDuration(bzh.stack.apiavtrans.entity.Service service, ZonedDateTime calculationTime) {
-        if (service.getDuree() != null) {
-            return service.getDuree();
-        } else if (service.getFin() == null && service.getDebut() != null) {
-            return java.time.Duration.between(service.getDebut(), calculationTime).getSeconds();
-        }
-        return 0;
     }
 
     @Transactional(readOnly = true)
@@ -532,40 +418,16 @@ public class UserService {
     private UserContractComparisonDTO buildContractComparison(User user, int year, int month) {
         ZoneId zone = ZoneId.of("Europe/Paris");
         ZonedDateTime monthStart = ZonedDateTime.of(year, month, 1, 0, 0, 0, 0, zone);
-        ZonedDateTime monthEnd = monthStart.plusMonths(1).minusNanos(1);
         ZonedDateTime now = ZonedDateTime.now(zone);
-        ZonedDateTime calculationEnd = monthEnd.isBefore(now) ? monthEnd : now;
 
-        // Heures travaillées
-        List<bzh.stack.apiavtrans.entity.Service> services =
-                serviceRepository.findByUserAndDebutBetween(user, monthStart, monthEnd);
+        // Heures travaillées : services débutés dans le mois, pauses déduites, en cours jusqu'à maintenant
+        TempsTravailCalculator.Bilan bilan = tempsTravailService.bilan(
+                user, new PeriodeHeures.Fenetre(monthStart, monthStart.plusMonths(1)), now);
 
         LocalDate today = now.toLocalDate();
-        long totalSeconds = 0;
-        long todaySeconds = 0;
-        Set<LocalDate> daysWorked = new HashSet<>();
-
-        for (bzh.stack.apiavtrans.entity.Service service : services) {
-            long duration = calculateServiceDuration(service, calculationEnd);
-            if (duration > 0) {
-                boolean startedToday = service.getDebut() != null
-                        && service.getDebut().withZoneSameInstant(zone).toLocalDate().equals(today);
-                if (service.getIsBreak()) {
-                    totalSeconds -= duration;
-                    if (startedToday) {
-                        todaySeconds -= duration;
-                    }
-                } else {
-                    totalSeconds += duration;
-                    if (startedToday) {
-                        todaySeconds += duration;
-                    }
-                    if (service.getDebut() != null) {
-                        daysWorked.add(service.getDebut().withZoneSameInstant(zone).toLocalDate());
-                    }
-                }
-            }
-        }
+        long totalSeconds = bilan.secondes();
+        long todaySeconds = bilan.secondesParJour().getOrDefault(today, 0L);
+        int joursTravailles = bilan.secondesParJour().size();
 
         double heuresEffectuees = Math.round(totalSeconds / 3600.0 * 100.0) / 100.0;
 
@@ -611,14 +473,13 @@ public class UserService {
             pourcentage = Math.round((heuresEffectuees / heureContrat) * 10000.0) / 100.0;
         }
 
-        int joursTravailles = daysWorked.size();
         Double moyenneParJour = joursTravailles > 0
                 ? Math.round((heuresEffectuees / joursTravailles) * 100.0) / 100.0
                 : 0.0;
 
         // Heures créditées : absences approuvées et jours fériés chômés
         HeuresAbsenceCalculator.CreditsPeriode credits =
-                heuresAbsenceCalculator.crediterPeriode(user, absences, firstDay, lastDay, daysWorked);
+                heuresAbsenceCalculator.crediterPeriode(user, absences, firstDay, lastDay, bilan.secondesParJour().keySet());
         double heuresTotal = HeuresAbsenceCalculator.round2(heuresEffectuees + credits.total());
         Double differenceTotal = null;
         Double pourcentageTotal = null;
@@ -661,7 +522,9 @@ public class UserService {
                 prevision.heuresParJour(),
                 prevision.heuresRestantes(),
                 heuresPrevisionnelles,
-                differencePrevisionnelle
+                differencePrevisionnelle,
+                bilan.enCours(),
+                now
         );
     }
 

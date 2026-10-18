@@ -76,4 +76,11 @@ public class UserContractComparisonDTO {
 
     @Schema(description = "Différence (prévision - contrat), null sans contrat", example = "0.83")
     private Double differencePrevisionnelle;
+
+    @Schema(description = "true si un service du mois est en cours hors pause : heuresEffectuees, difference, heuresTotal "
+            + "et differenceTotal augmentent du temps écoulé depuis calculeLe (heuresPrevisionnelles reste stable)", example = "false")
+    private Boolean enCours;
+
+    @Schema(description = "Instant de calcul (heure serveur)")
+    private java.time.ZonedDateTime calculeLe;
 }

@@ -7,7 +7,6 @@ import bzh.stack.apiavtrans.dto.common.UsersHoursListResponse;
 import bzh.stack.apiavtrans.entity.Absence;
 import bzh.stack.apiavtrans.entity.AbsenceType;
 import bzh.stack.apiavtrans.entity.User;
-import bzh.stack.apiavtrans.mapper.ServiceMapper;
 import bzh.stack.apiavtrans.mapper.UserMapper;
 import bzh.stack.apiavtrans.repository.AbsenceRepository;
 import bzh.stack.apiavtrans.repository.ServiceRepository;
@@ -21,6 +20,7 @@ import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.LocalDate;
+import java.util.EnumMap;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -43,7 +43,7 @@ class UserServiceTest {
     @Mock
     private UserMapper userMapper;
     @Mock
-    private ServiceMapper serviceMapper;
+    private TempsTravailService tempsTravailService;
     @Spy
     private HeuresAbsenceCalculator heuresAbsenceCalculator = new HeuresAbsenceCalculator(new JoursFeriesService());
 
@@ -106,9 +106,14 @@ class UserServiceTest {
         when(userRepository.findAllByIsVisibleTrueOrderByLastNameAscFirstNameAsc()).thenReturn(List.of(visibleUser));
         when(userMapper.toDTO(any(User.class))).thenAnswer(inv -> dtoOf(inv.getArgument(0)));
 
+        when(tempsTravailService.bilan(any(User.class), any(), any())).thenReturn(TempsTravailCalculator.Bilan.VIDE);
+
         List<UserWithStatusDTO> result = userService.getAllUsersWithStatus();
 
         assertThat(result).extracting(UserWithStatusDTO::getUuid).containsExactly(visibleUser.getUuid());
+        assertThat(result.get(0).getStatus()).isEqualTo(TempsTravailService.STATUT_ABSENT);
+        assertThat(result.get(0).getHoursToday().getSecondes()).isZero();
+        assertThat(result.get(0).getCalculeLe()).isNotNull();
         verify(userRepository, never()).findAllByOrderByLastNameAscFirstNameAsc();
     }
 
@@ -116,6 +121,12 @@ class UserServiceTest {
     void should_only_query_visible_users_when_getting_hours() {
         when(userRepository.findAllByIsVisibleTrueOrderByLastNameAscFirstNameAsc()).thenReturn(List.of(visibleUser));
         when(userMapper.toDTO(any(User.class))).thenAnswer(inv -> dtoOf(inv.getArgument(0)));
+
+        var bilans = new EnumMap<PeriodeHeures, TempsTravailCalculator.Bilan>(PeriodeHeures.class);
+        for (PeriodeHeures periode : PeriodeHeures.values()) {
+            bilans.put(periode, TempsTravailCalculator.Bilan.VIDE);
+        }
+        when(tempsTravailService.bilans(any(User.class), any(), any())).thenReturn(bilans);
 
         UsersHoursListResponse response = userService.getAllUsersWithHours();
 
@@ -129,6 +140,8 @@ class UserServiceTest {
     void should_only_query_visible_users_when_getting_contract_comparison() {
         when(userRepository.findAllByIsVisibleTrueOrderByLastNameAscFirstNameAsc()).thenReturn(List.of(visibleUser));
         when(userMapper.toDTO(any(User.class))).thenAnswer(inv -> dtoOf(inv.getArgument(0)));
+
+        when(tempsTravailService.bilan(any(User.class), any(), any())).thenReturn(TempsTravailCalculator.Bilan.VIDE);
 
         List<UserContractComparisonDTO> result = userService.getAllUsersContractComparison(2026, 9);
 
@@ -151,7 +164,7 @@ class UserServiceTest {
         absence.setStatus(Absence.AbsenceStatus.APPROVED);
 
         when(userRepository.findById(visibleUser.getUuid())).thenReturn(Optional.of(visibleUser));
-        when(serviceRepository.findByUserAndDebutBetween(any(User.class), any(), any())).thenReturn(List.of());
+        when(tempsTravailService.bilan(any(User.class), any(), any())).thenReturn(TempsTravailCalculator.Bilan.VIDE);
         when(absenceRepository.findApprovedByUserAndDateRange(visibleUser,
                 LocalDate.of(2026, 10, 31), LocalDate.of(2026, 11, 30))).thenReturn(List.of(absence));
         when(userMapper.toDTO(any(User.class))).thenAnswer(inv -> dtoOf(inv.getArgument(0)));
@@ -178,7 +191,7 @@ class UserServiceTest {
     @Test
     void should_have_no_forecast_hours_when_contract_is_missing() {
         when(userRepository.findById(visibleUser.getUuid())).thenReturn(Optional.of(visibleUser));
-        when(serviceRepository.findByUserAndDebutBetween(any(User.class), any(), any())).thenReturn(List.of());
+        when(tempsTravailService.bilan(any(User.class), any(), any())).thenReturn(TempsTravailCalculator.Bilan.VIDE);
         when(userMapper.toDTO(any(User.class))).thenAnswer(inv -> dtoOf(inv.getArgument(0)));
 
         UserContractComparisonDTO result = userService.getUserContractComparison(visibleUser.getUuid(), 2026, 11);

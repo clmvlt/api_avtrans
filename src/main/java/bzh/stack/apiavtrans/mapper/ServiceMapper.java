@@ -3,16 +3,25 @@ package bzh.stack.apiavtrans.mapper;
 import bzh.stack.apiavtrans.dto.service.ServiceDTO;
 import bzh.stack.apiavtrans.entity.Service;
 import bzh.stack.apiavtrans.entity.User;
+import bzh.stack.apiavtrans.service.TempsTravailCalculator;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
-import java.time.Duration;
-import java.time.ZoneId;
 import java.time.ZonedDateTime;
+import java.util.List;
 
 @Component
+@RequiredArgsConstructor
 public class ServiceMapper {
 
-    public ServiceDTO toDTO(Service service) {
+    private final TempsTravailCalculator tempsTravailCalculator;
+
+    /**
+     * Pointage avec ses durées calculées à {@code calculeLe}.
+     *
+     * @param pauses pauses du service de travail (ignoré pour une pause)
+     */
+    public ServiceDTO toDTO(Service service, List<Service> pauses, ZonedDateTime calculeLe) {
         if (service == null) {
             return null;
         }
@@ -21,14 +30,7 @@ public class ServiceMapper {
         dto.setUuid(service.getUuid());
         dto.setDebut(service.getDebut());
         dto.setFin(service.getFin());
-
-        Long duree = service.getDuree();
-        if (duree == null && service.getFin() == null && service.getDebut() != null) {
-            ZonedDateTime now = ZonedDateTime.now(ZoneId.of("Europe/Paris"));
-            duree = Duration.between(service.getDebut(), now).getSeconds();
-        }
-        dto.setDuree(duree);
-
+        dto.setDuree(tempsTravailCalculator.dureeBrute(service, calculeLe));
         dto.setIsBreak(service.getIsBreak());
         dto.setLatitude(service.getLatitude());
         dto.setLongitude(service.getLongitude());
@@ -37,11 +39,23 @@ public class ServiceMapper {
         dto.setIsAdmin(service.getIsAdmin());
         dto.setUserUuid(service.getUser() != null ? service.getUser().getUuid() : null);
         dto.setModifiedAt(service.getModifiedAt());
+        dto.setCalculeLe(calculeLe);
+        dto.setEnCours(service.getFin() == null);
 
         User modifiedBy = service.getModifiedBy();
         if (modifiedBy != null) {
             dto.setModifiedByUuid(modifiedBy.getUuid());
             dto.setModifiedByName(fullName(modifiedBy));
+        }
+
+        if (Boolean.TRUE.equals(service.getIsBreak())) {
+            dto.setServiceParentUuid(service.getServiceParent() != null ? service.getServiceParent().getUuid() : null);
+        } else {
+            List<Service> pausesDuService = pauses != null ? pauses : List.of();
+            dto.setPauses(pausesDuService.stream().map(pause -> toDTO(pause, null, calculeLe)).toList());
+            dto.setDureePauses(tempsTravailCalculator.dureePauses(service, pausesDuService, calculeLe));
+            dto.setDureeTravail(tempsTravailCalculator.dureeTravail(service, pausesDuService, calculeLe));
+            dto.setEnPause(tempsTravailCalculator.enPause(service, pausesDuService));
         }
 
         return dto;

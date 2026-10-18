@@ -1,339 +1,192 @@
 package bzh.stack.apiavtrans.service;
 
+import bzh.stack.apiavtrans.dto.service.ServiceDTO;
+import bzh.stack.apiavtrans.dto.service.WorkedHoursDto;
 import bzh.stack.apiavtrans.entity.Service;
 import bzh.stack.apiavtrans.entity.User;
+import bzh.stack.apiavtrans.mapper.ServiceMapper;
 import bzh.stack.apiavtrans.repository.ServiceRepository;
 import bzh.stack.apiavtrans.repository.UserRepository;
+import bzh.stack.apiavtrans.service.PeriodeHeures.Fenetre;
+import bzh.stack.apiavtrans.service.TempsTravailCalculator.Bilan;
 import lombok.RequiredArgsConstructor;
-import org.springframework.transaction.annotation.Transactional;
-
-import java.time.Duration;
-import java.time.ZoneId;
-import java.time.ZonedDateTime;
-import java.time.temporal.ChronoUnit;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
-import java.math.BigDecimal;
-import java.math.RoundingMode;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.Duration;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
+import java.time.temporal.ChronoUnit;
+import java.util.EnumMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 
+/**
+ * Pointage : un service de travail par salarié en cours au plus, et ses pauses rattachées
+ * (au plus une pause en cours, dans un service en cours).
+ */
 @org.springframework.stereotype.Service
 @RequiredArgsConstructor
 public class ServiceService {
 
+    private static final DateTimeFormatter FORMAT_DATE_HEURE = DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm");
+
     private final ServiceRepository serviceRepository;
     private final UserRepository userRepository;
     private final ServiceModificationService serviceModificationService;
+    private final TempsTravailService tempsTravailService;
+    private final ServiceMapper serviceMapper;
 
-    private long calculateServiceDuration(Service service, ZonedDateTime calculationTime) {
-        if (service.getDuree() != null) {
-            return service.getDuree();
-        } else if (service.getFin() == null && service.getDebut() != null) {
-            return Duration.between(service.getDebut(), calculationTime).getSeconds();
-        }
-        return 0;
-    }
+    // ── Pointage du salarié ──
 
     @Transactional
-    public Service startService(String userEmail, Double latitude, Double longitude, Boolean isAdmin) {
-        User user = userRepository.findByEmail(userEmail)
-                .orElseThrow(() -> new RuntimeException("User not found with email: " + userEmail));
+    public ServiceDTO startService(String userEmail, Double latitude, Double longitude, Boolean isAdmin) {
+        User user = userByEmail(userEmail);
 
-        if (serviceRepository.findFirstByUserAndFinIsNullOrderByDebutDesc(user).isPresent()) {
+        if (tempsTravailService.serviceActif(user).isPresent()) {
             throw new RuntimeException("User already has an active service");
         }
 
+        ZonedDateTime maintenant = maintenant();
         Service service = new Service();
-        service.setDebut(ZonedDateTime.now(ZoneId.of("Europe/Paris")));
+        service.setDebut(maintenant);
         service.setUser(user);
         service.setLatitude(latitude);
         service.setLongitude(longitude);
         service.setIsBreak(false);
         service.setIsAdmin(isAdmin != null ? isAdmin : false);
 
-        return serviceRepository.save(service);
+        return tempsTravailService.etat(serviceRepository.save(service), maintenant);
     }
 
     @Transactional
-    public Service endService(String userEmail, Double latitude, Double longitude) {
-        User user = userRepository.findByEmail(userEmail)
-                .orElseThrow(() -> new RuntimeException("User not found with email: " + userEmail));
-
-        Service service = serviceRepository.findFirstByUserAndFinIsNullOrderByDebutDesc(user)
+    public ServiceDTO endService(String userEmail, Double latitude, Double longitude) {
+        User user = userByEmail(userEmail);
+        Service service = tempsTravailService.serviceActif(user)
                 .orElseThrow(() -> new RuntimeException("No active service found for user"));
 
-        if (service.getIsBreak()) {
+        if (serviceRepository.findFirstByServiceParentAndFinIsNullOrderByDebutDesc(service).isPresent()) {
             throw new RuntimeException("Cannot end service: user is on break. End break first.");
         }
 
-        ZonedDateTime fin = ZonedDateTime.now(ZoneId.of("Europe/Paris"));
-        service.setFin(fin);
+        ZonedDateTime maintenant = maintenant();
+        cloturer(service, maintenant, latitude, longitude);
 
-        long durationInSeconds = Duration.between(service.getDebut(), fin).getSeconds();
-        service.setDuree(durationInSeconds);
-
-        if (latitude != null) {
-            service.setLatitudeEnd(latitude);
-        }
-        if (longitude != null) {
-            service.setLongitudeEnd(longitude);
-        }
-
-        return serviceRepository.save(service);
+        return tempsTravailService.etat(serviceRepository.save(service), maintenant);
     }
 
     @Transactional
-    public Service startBreak(String userEmail, Double latitude, Double longitude) {
-        User user = userRepository.findByEmail(userEmail)
-                .orElseThrow(() -> new RuntimeException("User not found with email: " + userEmail));
+    public ServiceDTO startBreak(String userEmail, Double latitude, Double longitude) {
+        User user = userByEmail(userEmail);
+        Service service = tempsTravailService.serviceActif(user)
+                .orElseThrow(() -> new RuntimeException("Cannot start break: No active service found or already on break"));
 
-        Service activeService = serviceRepository.findFirstByUserAndFinIsNullOrderByDebutDesc(user).orElse(null);
-        if (activeService == null || activeService.getIsBreak()) {
+        if (serviceRepository.findFirstByServiceParentAndFinIsNullOrderByDebutDesc(service).isPresent()) {
             throw new RuntimeException("Cannot start break: No active service found or already on break");
         }
 
-        Service breakService = new Service();
-        breakService.setDebut(ZonedDateTime.now(ZoneId.of("Europe/Paris")));
-        breakService.setUser(user);
-        breakService.setLatitude(latitude);
-        breakService.setLongitude(longitude);
-        breakService.setIsBreak(true);
-        breakService.setIsAdmin(false);
+        ZonedDateTime maintenant = maintenant();
+        Service pause = new Service();
+        pause.setDebut(maintenant);
+        pause.setUser(user);
+        pause.setLatitude(latitude);
+        pause.setLongitude(longitude);
+        pause.setIsBreak(true);
+        pause.setIsAdmin(false);
+        pause.setServiceParent(service);
+        serviceRepository.save(pause);
 
-        return serviceRepository.save(breakService);
+        return tempsTravailService.etat(service, maintenant);
     }
 
     @Transactional
-    public Service endBreak(String userEmail, Double latitude, Double longitude) {
-        User user = userRepository.findByEmail(userEmail)
-                .orElseThrow(() -> new RuntimeException("User not found with email: " + userEmail));
-
-        Service breakService = serviceRepository.findFirstByUserAndFinIsNullOrderByDebutDesc(user)
+    public ServiceDTO endBreak(String userEmail, Double latitude, Double longitude) {
+        User user = userByEmail(userEmail);
+        Service service = tempsTravailService.serviceActif(user)
                 .orElseThrow(() -> new RuntimeException("No active service found"));
+        Service pause = serviceRepository.findFirstByServiceParentAndFinIsNullOrderByDebutDesc(service)
+                .orElseThrow(() -> new RuntimeException("Active service is not a break"));
 
-        if (!breakService.getIsBreak()) {
-            throw new RuntimeException("Active service is not a break");
-        }
+        ZonedDateTime maintenant = maintenant();
+        cloturer(pause, maintenant, latitude, longitude);
+        serviceRepository.save(pause);
 
-        ZonedDateTime fin = ZonedDateTime.now(ZoneId.of("Europe/Paris"));
-        breakService.setFin(fin);
-
-        long durationInSeconds = Duration.between(breakService.getDebut(), fin).getSeconds();
-        breakService.setDuree(durationInSeconds);
-
-        if (latitude != null) {
-            breakService.setLatitudeEnd(latitude);
-        }
-        if (longitude != null) {
-            breakService.setLongitudeEnd(longitude);
-        }
-
-        return serviceRepository.save(breakService);
+        return tempsTravailService.etat(service, maintenant);
     }
 
-    public List<Service> getUserServices(String userEmail) {
-        User user = userRepository.findByEmail(userEmail)
-                .orElseThrow(() -> new RuntimeException("User not found with email: " + userEmail));
+    // ── Lecture ──
 
-        return serviceRepository.findByUser(user);
+    @Transactional(readOnly = true)
+    public ServiceDTO getActiveService(String userEmail) {
+        return tempsTravailService.etatActuel(userByEmail(userEmail), maintenant());
     }
 
-    public List<Service> getUserServicesByUuid(UUID userUuid) {
-        User user = userRepository.findById(userUuid)
-                .orElseThrow(() -> new RuntimeException("User not found with uuid: " + userUuid));
-
-        return serviceRepository.findByUser(user);
+    @Transactional(readOnly = true)
+    public ServiceDTO getActiveServiceByUuid(UUID userUuid) {
+        return tempsTravailService.etatActuel(userByUuid(userUuid), maintenant());
     }
 
-    public Service getActiveService(String userEmail) {
-        User user = userRepository.findByEmail(userEmail)
-                .orElseThrow(() -> new RuntimeException("User not found with email: " + userEmail));
-
-        return serviceRepository.findFirstByUserAndFinIsNullOrderByDebutDesc(user).orElse(null);
+    /** Services de travail débutés aujourd'hui, avec leurs pauses (même après minuit). */
+    @Transactional(readOnly = true)
+    public List<ServiceDTO> getDailyServices(String userEmail) {
+        ZonedDateTime maintenant = maintenant();
+        return servicesDeLaFenetre(userByEmail(userEmail), PeriodeHeures.DAY.fenetre(maintenant), maintenant);
     }
 
-    public Service getActiveServiceByUuid(UUID userUuid) {
-        User user = userRepository.findById(userUuid)
-                .orElseThrow(() -> new RuntimeException("User not found with uuid: " + userUuid));
-
-        return serviceRepository.findFirstByUserAndFinIsNullOrderByDebutDesc(user).orElse(null);
+    /** Services de travail débutés dans le mois, avec leurs pauses. */
+    @Transactional(readOnly = true)
+    public List<ServiceDTO> getServicesForMonth(String userEmail, Integer year, Integer month) {
+        ZonedDateTime maintenant = maintenant();
+        Fenetre mois = PeriodeHeures.MONTH.fenetre(maintenant, year, month, null, null);
+        return servicesDeLaFenetre(userByEmail(userEmail), mois, maintenant);
     }
 
-    public List<Service> getServicesForMonth(String userEmail, Integer year, Integer month) {
-        User user = userRepository.findByEmail(userEmail)
-                .orElseThrow(() -> new RuntimeException("User not found with email: " + userEmail));
-
-        ZonedDateTime now = ZonedDateTime.now(ZoneId.of("Europe/Paris"));
-        int targetYear = year != null ? year : now.getYear();
-        int targetMonth = month != null ? month : now.getMonthValue();
-
-        ZonedDateTime startOfMonth = ZonedDateTime.of(targetYear, targetMonth, 1, 0, 0, 0, 0, ZoneId.of("Europe/Paris"));
-        ZonedDateTime endOfMonth = startOfMonth.plusMonths(1).minusNanos(1);
-
-        return serviceRepository.findByUserAndDebutBetween(user, startOfMonth, endOfMonth);
+    @Transactional(readOnly = true)
+    public WorkedHoursDto getWorkedHours(String userEmail, String period, Integer year, Integer month, Integer week, Integer day) {
+        return heuresTravaillees(userByEmail(userEmail), period, year, month, week, day);
     }
 
-    public double calculateWorkedHours(String userEmail, String period, Integer year, Integer month, Integer week, Integer day) {
-        User user = userRepository.findByEmail(userEmail)
-                .orElseThrow(() -> new RuntimeException("User not found with email: " + userEmail));
-
-        ZonedDateTime now = ZonedDateTime.now(ZoneId.of("Europe/Paris"));
-        ZonedDateTime start;
-        ZonedDateTime end = now;
-
-        int targetYear = year != null ? year : now.getYear();
-        int targetMonth = month != null ? month : now.getMonthValue();
-        int targetWeek = week != null ? week : now.get(java.time.temporal.WeekFields.ISO.weekOfWeekBasedYear());
-        int targetDay = day != null ? day : now.getDayOfMonth();
-
-        switch (period.toLowerCase()) {
-            case "day":
-                start = ZonedDateTime.of(targetYear, targetMonth, targetDay, 0, 0, 0, 0, ZoneId.of("Europe/Paris"));
-                end = start.plusDays(1).minusNanos(1);
-                break;
-            case "week":
-                start = ZonedDateTime.now(ZoneId.of("Europe/Paris"))
-                        .with(java.time.temporal.WeekFields.ISO.weekOfWeekBasedYear(), targetWeek)
-                        .with(java.time.temporal.WeekFields.ISO.dayOfWeek(), 1)
-                        .withYear(targetYear)
-                        .toLocalDate().atStartOfDay(ZoneId.of("Europe/Paris"));
-                end = start.plusWeeks(1).minusNanos(1);
-                break;
-            case "month":
-                start = ZonedDateTime.of(targetYear, targetMonth, 1, 0, 0, 0, 0, ZoneId.of("Europe/Paris"));
-                end = start.plusMonths(1).minusNanos(1);
-                break;
-            case "year":
-                start = ZonedDateTime.of(targetYear, 1, 1, 0, 0, 0, 0, ZoneId.of("Europe/Paris"));
-                end = start.plusYears(1).minusNanos(1);
-                break;
-            case "lastmonth":
-                ZonedDateTime firstDayOfCurrentMonth = ZonedDateTime.of(now.getYear(), now.getMonthValue(), 1, 0, 0, 0, 0, ZoneId.of("Europe/Paris"));
-                start = firstDayOfCurrentMonth.minusMonths(1);
-                end = firstDayOfCurrentMonth.minusNanos(1);
-                break;
-            default:
-                throw new RuntimeException("Invalid period. Use: day, week, month, year, or lastmonth");
-        }
-
-        List<Service> services = serviceRepository.findByUserAndDebutBetween(user, start, end);
-
-        long totalSeconds = 0;
-        ZonedDateTime calculationTime = ZonedDateTime.now(ZoneId.of("Europe/Paris"));
-
-        for (Service service : services) {
-            long duration = calculateServiceDuration(service, calculationTime);
-            if (duration > 0) {
-                if (service.getIsBreak()) {
-                    totalSeconds -= duration;
-                } else {
-                    totalSeconds += duration;
-                }
-            }
-        }
-
-        double hours = totalSeconds / 3600.0;
-        return BigDecimal.valueOf(hours).setScale(2, RoundingMode.HALF_UP).doubleValue();
+    @Transactional(readOnly = true)
+    public WorkedHoursDto getWorkedHoursByUuid(UUID userUuid, String period, Integer year, Integer month, Integer week, Integer day) {
+        return heuresTravaillees(userByUuid(userUuid), period, year, month, week, day);
     }
 
-    public double calculateWorkedHoursByUuid(UUID userUuid, String period, Integer year, Integer month, Integer week, Integer day) {
-        User user = userRepository.findById(userUuid)
-                .orElseThrow(() -> new RuntimeException("User not found with uuid: " + userUuid));
-
-        ZonedDateTime now = ZonedDateTime.now(ZoneId.of("Europe/Paris"));
-        ZonedDateTime start;
-        ZonedDateTime end = now;
-
-        int targetYear = year != null ? year : now.getYear();
-        int targetMonth = month != null ? month : now.getMonthValue();
-        int targetWeek = week != null ? week : now.get(java.time.temporal.WeekFields.ISO.weekOfWeekBasedYear());
-        int targetDay = day != null ? day : now.getDayOfMonth();
-
-        switch (period.toLowerCase()) {
-            case "day":
-                start = ZonedDateTime.of(targetYear, targetMonth, targetDay, 0, 0, 0, 0, ZoneId.of("Europe/Paris"));
-                end = start.plusDays(1).minusNanos(1);
-                break;
-            case "week":
-                start = ZonedDateTime.now(ZoneId.of("Europe/Paris"))
-                        .with(java.time.temporal.WeekFields.ISO.weekOfWeekBasedYear(), targetWeek)
-                        .with(java.time.temporal.WeekFields.ISO.dayOfWeek(), 1)
-                        .withYear(targetYear)
-                        .toLocalDate().atStartOfDay(ZoneId.of("Europe/Paris"));
-                end = start.plusWeeks(1).minusNanos(1);
-                break;
-            case "month":
-                start = ZonedDateTime.of(targetYear, targetMonth, 1, 0, 0, 0, 0, ZoneId.of("Europe/Paris"));
-                end = start.plusMonths(1).minusNanos(1);
-                break;
-            case "year":
-                start = ZonedDateTime.of(targetYear, 1, 1, 0, 0, 0, 0, ZoneId.of("Europe/Paris"));
-                end = start.plusYears(1).minusNanos(1);
-                break;
-            case "lastmonth":
-                ZonedDateTime firstDayOfCurrentMonth = ZonedDateTime.of(now.getYear(), now.getMonthValue(), 1, 0, 0, 0, 0, ZoneId.of("Europe/Paris"));
-                start = firstDayOfCurrentMonth.minusMonths(1);
-                end = firstDayOfCurrentMonth.minusNanos(1);
-                break;
-            default:
-                throw new RuntimeException("Invalid period. Use: day, week, month, year, or lastmonth");
-        }
-
-        List<Service> services = serviceRepository.findByUserAndDebutBetween(user, start, end);
-
-        long totalSeconds = 0;
-        ZonedDateTime calculationTime = ZonedDateTime.now(ZoneId.of("Europe/Paris"));
-
-        for (Service service : services) {
-            long duration = calculateServiceDuration(service, calculationTime);
-            if (duration > 0) {
-                if (service.getIsBreak()) {
-                    totalSeconds -= duration;
-                } else {
-                    totalSeconds += duration;
-                }
-            }
-        }
-
-        double hours = totalSeconds / 3600.0;
-        return BigDecimal.valueOf(hours).setScale(2, RoundingMode.HALF_UP).doubleValue();
+    @Transactional(readOnly = true)
+    public Page<ServiceDTO> getUserServicesHistory(String userEmail, int page, int size,
+                                                   Boolean isBreak, ZonedDateTime startDate, ZonedDateTime endDate,
+                                                   String sortBy, String sortDirection) {
+        return historique(userByEmail(userEmail), page, size, isBreak, startDate, endDate, sortBy, sortDirection);
     }
 
-    public Page<Service> getUserServicesPaginated(String userEmail, int page, int size) {
-        User user = userRepository.findByEmail(userEmail)
-                .orElseThrow(() -> new RuntimeException("User not found with email: " + userEmail));
-
-        Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "debut"));
-        return serviceRepository.findByUser(user, pageable);
+    @Transactional(readOnly = true)
+    public Page<ServiceDTO> getUserServicesHistoryByUuid(UUID userUuid, int page, int size,
+                                                         Boolean isBreak, ZonedDateTime startDate, ZonedDateTime endDate,
+                                                         String sortBy, String sortDirection) {
+        ZonedDateTime maintenant = maintenant();
+        ZonedDateTime effectiveStartDate = startDate != null ? startDate : maintenant.minusDays(30);
+        ZonedDateTime effectiveEndDate = endDate != null ? endDate : maintenant.plusYears(10);
+        return historique(userByUuid(userUuid), page, size, isBreak, effectiveStartDate, effectiveEndDate, sortBy, sortDirection);
     }
 
-    public Page<Service> getUserServicesHistory(String userEmail, int page, int size,
-                                                 Boolean isBreak, ZonedDateTime startDate, ZonedDateTime endDate,
-                                                 String sortBy, String sortDirection) {
-        User user = userRepository.findByEmail(userEmail)
-                .orElseThrow(() -> new RuntimeException("User not found with email: " + userEmail));
-
-        String sortField = sortBy != null ? sortBy : "debut";
-        Sort.Direction direction = "asc".equalsIgnoreCase(sortDirection) ? Sort.Direction.ASC : Sort.Direction.DESC;
-        Pageable pageable = PageRequest.of(page, size, Sort.by(direction, sortField));
-
-        return serviceRepository.findByUserWithFilters(user, isBreak, startDate, endDate, pageable);
-    }
+    // ── Administration ──
 
     @Transactional
-    public Service createServiceForUser(UUID userUuid, ZonedDateTime debut, ZonedDateTime fin,
-                                       Double latitude, Double longitude,
-                                       Double latitudeEnd, Double longitudeEnd,
-                                       Boolean isBreak, User admin) {
-        User user = userRepository.findById(userUuid)
-                .orElseThrow(() -> new RuntimeException("User not found with uuid: " + userUuid));
+    public ServiceDTO createServiceForUser(UUID userUuid, ZonedDateTime debut, ZonedDateTime fin,
+                                           Double latitude, Double longitude,
+                                           Double latitudeEnd, Double longitudeEnd,
+                                           Boolean isBreak, UUID serviceParentUuid, User admin) {
+        User user = userByUuid(userUuid);
+        ZonedDateTime maintenant = maintenant();
 
         Service service = new Service();
-        service.setDebut(debut != null ? debut : ZonedDateTime.now(ZoneId.of("Europe/Paris")));
+        service.setDebut(debut != null ? debut : maintenant);
+        service.setFin(fin);
         service.setUser(user);
         service.setLatitude(latitude);
         service.setLongitude(longitude);
@@ -342,55 +195,72 @@ public class ServiceService {
         service.setIsBreak(isBreak != null ? isBreak : false);
         service.setIsAdmin(true);
 
-        if (fin != null) {
-            service.setFin(fin);
-            long durationInSeconds = Duration.between(service.getDebut(), fin).getSeconds();
-            service.setDuree(durationInSeconds);
+        verifierBornes(service);
+        if (service.getIsBreak()) {
+            service.setServiceParent(resoudreServiceParent(service, serviceParentUuid));
+            verifierPause(service);
+        } else if (service.getFin() == null) {
+            verifierAucunAutreServiceEnCours(service);
         }
+        service.setDuree(dureeStockee(service));
 
         Service saved = serviceRepository.save(service);
         serviceModificationService.logCreation(saved, admin);
-        return saved;
+        return versDTO(saved, maintenant);
     }
 
     @Transactional
-    public Service updateService(UUID serviceUuid, ZonedDateTime debut, ZonedDateTime fin,
-                                Double latitude, Double longitude,
-                                Double latitudeEnd, Double longitudeEnd,
-                                Boolean isBreak, User admin) {
+    public ServiceDTO updateService(UUID serviceUuid, ZonedDateTime debut, ZonedDateTime fin,
+                                    Double latitude, Double longitude,
+                                    Double latitudeEnd, Double longitudeEnd,
+                                    Boolean isBreak, UUID serviceParentUuid, User admin) {
         Service service = serviceRepository.findById(serviceUuid)
                 .orElseThrow(() -> new RuntimeException("Service not found"));
 
         ZonedDateTime oldDebut = service.getDebut();
         ZonedDateTime oldFin = service.getFin();
         Boolean oldIsBreak = service.getIsBreak();
+        boolean devientPause = Boolean.TRUE.equals(isBreak) && !Boolean.TRUE.equals(oldIsBreak);
+
+        if (devientPause && !serviceRepository.findByServiceParentOrderByDebutAsc(service).isEmpty()) {
+            throw new RuntimeException("Ce service contient des pauses : supprimez-les avant de le transformer en pause");
+        }
 
         if (debut != null) {
             service.setDebut(debut);
         }
-
         service.setFin(fin);
         service.setLatitude(latitude);
         service.setLongitude(longitude);
         service.setLatitudeEnd(latitudeEnd);
         service.setLongitudeEnd(longitudeEnd);
-
         if (isBreak != null) {
             service.setIsBreak(isBreak);
         }
 
-        if (service.getDebut() != null && service.getFin() != null) {
-            long durationInSeconds = Duration.between(service.getDebut(), service.getFin()).getSeconds();
-            service.setDuree(durationInSeconds);
-        } else if (service.getFin() == null) {
-            service.setDuree(null);
+        verifierBornes(service);
+        if (service.getIsBreak()) {
+            Service parentActuel = devientPause ? null : service.getServiceParent();
+            // Re-rattachement si demandé, ou si la pause ne commence plus pendant son service
+            if (serviceParentUuid != null || parentActuel == null || !contient(parentActuel, service.getDebut())) {
+                service.setServiceParent(resoudreServiceParent(service, serviceParentUuid));
+            }
+            verifierPause(service);
+        } else {
+            service.setServiceParent(null);
+            if (service.getFin() == null) {
+                verifierAucunAutreServiceEnCours(service);
+            } else if (serviceRepository.findFirstByServiceParentAndFinIsNullOrderByDebutDesc(service).isPresent()) {
+                throw new RuntimeException("Ce service a une pause en cours : terminez la pause avant de clôturer le service");
+            }
         }
+        service.setDuree(dureeStockee(service));
 
         boolean changed = !isSameSecond(oldDebut, service.getDebut())
                 || !isSameSecond(oldFin, service.getFin())
                 || !Objects.equals(oldIsBreak, service.getIsBreak());
         if (changed) {
-            service.setModifiedAt(ZonedDateTime.now(ZoneId.of("Europe/Paris")));
+            service.setModifiedAt(maintenant());
             service.setModifiedBy(admin);
         }
 
@@ -398,15 +268,160 @@ public class ServiceService {
         if (changed) {
             serviceModificationService.logUpdate(saved, oldDebut, oldFin, oldIsBreak, admin);
         }
-        return saved;
+        return versDTO(saved, maintenant());
     }
 
+    /** Supprime un pointage ; un service de travail est supprimé avec ses pauses (chacune tracée). */
     @Transactional
     public void deleteService(UUID serviceUuid, User admin) {
         Service service = serviceRepository.findById(serviceUuid)
                 .orElseThrow(() -> new RuntimeException("Service not found with uuid: " + serviceUuid));
+
+        if (!Boolean.TRUE.equals(service.getIsBreak())) {
+            for (Service pause : serviceRepository.findByServiceParentOrderByDebutAsc(service)) {
+                serviceModificationService.logDeletion(pause, admin);
+                serviceRepository.delete(pause);
+            }
+        }
         serviceModificationService.logDeletion(service, admin);
         serviceRepository.delete(service);
+    }
+
+    // ── Interne ──
+
+    private WorkedHoursDto heuresTravaillees(User user, String period, Integer year, Integer month, Integer week, Integer day) {
+        ZonedDateTime maintenant = maintenant();
+        Map<PeriodeHeures, Fenetre> fenetres = new EnumMap<>(PeriodeHeures.class);
+        if (period != null && !period.isBlank()) {
+            PeriodeHeures periode = PeriodeHeures.parse(period);
+            fenetres.put(periode, periode.fenetre(maintenant, year, month, week, day));
+        } else {
+            fenetres.put(PeriodeHeures.YEAR, PeriodeHeures.YEAR.fenetre(maintenant, year, null, null, null));
+            fenetres.put(PeriodeHeures.MONTH, PeriodeHeures.MONTH.fenetre(maintenant, year, month, null, null));
+            fenetres.put(PeriodeHeures.WEEK, PeriodeHeures.WEEK.fenetre(maintenant, year, null, week, null));
+            fenetres.put(PeriodeHeures.DAY, PeriodeHeures.DAY.fenetre(maintenant, year, month, null, day));
+            fenetres.put(PeriodeHeures.LASTMONTH, PeriodeHeures.LASTMONTH.fenetre(maintenant));
+        }
+
+        Map<PeriodeHeures, Bilan> bilans = tempsTravailService.bilans(user, fenetres, maintenant);
+        WorkedHoursDto dto = new WorkedHoursDto();
+        dto.setCalculeLe(maintenant);
+        bilans.forEach((periode, bilan) -> {
+            var heures = TempsTravailService.versHeures(bilan);
+            switch (periode) {
+                case YEAR -> dto.setYear(heures);
+                case MONTH -> dto.setMonth(heures);
+                case WEEK -> dto.setWeek(heures);
+                case DAY -> dto.setDay(heures);
+                case LASTMONTH -> dto.setLastMonth(heures);
+            }
+        });
+        return dto;
+    }
+
+    private List<ServiceDTO> servicesDeLaFenetre(User user, Fenetre fenetre, ZonedDateTime maintenant) {
+        return tempsTravailService.versDTOs(tempsTravailService.servicesTravail(user, fenetre), maintenant);
+    }
+
+    private Page<ServiceDTO> historique(User user, int page, int size, Boolean isBreak,
+                                        ZonedDateTime startDate, ZonedDateTime endDate,
+                                        String sortBy, String sortDirection) {
+        String sortField = sortBy != null ? sortBy : "debut";
+        Sort.Direction direction = "asc".equalsIgnoreCase(sortDirection) ? Sort.Direction.ASC : Sort.Direction.DESC;
+        Pageable pageable = PageRequest.of(page, size, Sort.by(direction, sortField));
+
+        Page<Service> lignes = serviceRepository.findByUserWithFilters(user, isBreak, startDate, endDate, pageable);
+        List<ServiceDTO> dtos = tempsTravailService.versDTOs(lignes.getContent(), maintenant());
+        return new PageImpl<>(dtos, lignes.getPageable(), lignes.getTotalElements());
+    }
+
+    private ServiceDTO versDTO(Service ligne, ZonedDateTime maintenant) {
+        return Boolean.TRUE.equals(ligne.getIsBreak())
+                ? serviceMapper.toDTO(ligne, null, maintenant)
+                : tempsTravailService.etat(ligne, maintenant);
+    }
+
+    private void cloturer(Service ligne, ZonedDateTime fin, Double latitude, Double longitude) {
+        ligne.setFin(fin);
+        ligne.setDuree(dureeStockee(ligne));
+        if (latitude != null) {
+            ligne.setLatitudeEnd(latitude);
+        }
+        if (longitude != null) {
+            ligne.setLongitudeEnd(longitude);
+        }
+    }
+
+    /** Durée brute stockée en base : null tant que la ligne est en cours. */
+    private static Long dureeStockee(Service ligne) {
+        if (ligne.getDebut() == null || ligne.getFin() == null) {
+            return null;
+        }
+        return Duration.between(ligne.getDebut(), ligne.getFin()).getSeconds();
+    }
+
+    private static void verifierBornes(Service ligne) {
+        if (ligne.getFin() != null && ligne.getFin().isBefore(ligne.getDebut())) {
+            throw new RuntimeException("La fin doit être postérieure au début");
+        }
+    }
+
+    /**
+     * Service de travail d'une pause : celui demandé (même salarié, la pause commence pendant le service),
+     * sinon le service du salarié en cours au début de la pause.
+     */
+    private Service resoudreServiceParent(Service pause, UUID serviceParentUuid) {
+        if (serviceParentUuid != null) {
+            Service parent = serviceRepository.findById(serviceParentUuid)
+                    .orElseThrow(() -> new RuntimeException("Service parent introuvable : " + serviceParentUuid));
+            if (Boolean.TRUE.equals(parent.getIsBreak())) {
+                throw new RuntimeException("Une pause ne peut être rattachée qu'à un service de travail");
+            }
+            if (!parent.getUser().getUuid().equals(pause.getUser().getUuid())) {
+                throw new RuntimeException("Le service parent appartient à un autre utilisateur");
+            }
+            if (!contient(parent, pause.getDebut())) {
+                throw new RuntimeException("La pause doit commencer pendant son service ("
+                        + formater(parent.getDebut()) + " → "
+                        + (parent.getFin() != null ? formater(parent.getFin()) : "en cours") + ")");
+            }
+            return parent;
+        }
+        return serviceRepository.findServicesTravailContenant(pause.getUser(), pause.getDebut()).stream()
+                .filter(s -> !s.getUuid().equals(pause.getUuid()))
+                .findFirst()
+                .orElseThrow(() -> new RuntimeException("Aucun service de travail ne couvre le début de la pause ("
+                        + formater(pause.getDebut()) + ") : créez d'abord le service ou précisez serviceParentUuid"));
+    }
+
+    /** Une pause sans fin appartient à un service en cours, qui n'a pas d'autre pause en cours. */
+    private void verifierPause(Service pause) {
+        if (pause.getFin() != null) {
+            return;
+        }
+        Service parent = pause.getServiceParent();
+        if (parent.getFin() != null) {
+            throw new RuntimeException("Une pause sans fin ne peut appartenir qu'à un service en cours");
+        }
+        serviceRepository.findFirstByServiceParentAndFinIsNullOrderByDebutDesc(parent)
+                .filter(autre -> !autre.getUuid().equals(pause.getUuid()))
+                .ifPresent(autre -> {
+                    throw new RuntimeException("Ce service a déjà une pause en cours");
+                });
+    }
+
+    private void verifierAucunAutreServiceEnCours(Service service) {
+        tempsTravailService.serviceActif(service.getUser())
+                .filter(autre -> !autre.getUuid().equals(service.getUuid()))
+                .ifPresent(autre -> {
+                    throw new RuntimeException("L'utilisateur a déjà un service en cours depuis le " + formater(autre.getDebut()));
+                });
+    }
+
+    private static boolean contient(Service travail, ZonedDateTime instant) {
+        return instant != null
+                && !instant.isBefore(travail.getDebut())
+                && (travail.getFin() == null || !instant.isAfter(travail.getFin()));
     }
 
     // Comparaison à la seconde : le front renvoie les dates avec une précision moindre que la base (microsecondes)
@@ -417,37 +432,21 @@ public class ServiceService {
         return a.toInstant().truncatedTo(ChronoUnit.SECONDS).equals(b.toInstant().truncatedTo(ChronoUnit.SECONDS));
     }
 
-    public Page<Service> getUserServicesHistoryByUuid(UUID userUuid, int page, int size,
-                                                       Boolean isBreak, ZonedDateTime startDate, ZonedDateTime endDate,
-                                                       String sortBy, String sortDirection) {
-        User user = userRepository.findById(userUuid)
-                .orElseThrow(() -> new RuntimeException("User not found with uuid: " + userUuid));
-
-        ZonedDateTime effectiveStartDate = startDate;
-        ZonedDateTime effectiveEndDate = endDate;
-
-        if (effectiveStartDate == null) {
-            effectiveStartDate = ZonedDateTime.now(ZoneId.of("Europe/Paris")).minusDays(30);
-        }
-        if (effectiveEndDate == null) {
-            effectiveEndDate = ZonedDateTime.now(ZoneId.of("Europe/Paris")).plusYears(10);
-        }
-
-        String sortField = sortBy != null ? sortBy : "debut";
-        Sort.Direction direction = "asc".equalsIgnoreCase(sortDirection) ? Sort.Direction.ASC : Sort.Direction.DESC;
-        Pageable pageable = PageRequest.of(page, size, Sort.by(direction, sortField));
-
-        return serviceRepository.findByUserWithFilters(user, isBreak, effectiveStartDate, effectiveEndDate, pageable);
+    private static String formater(ZonedDateTime instant) {
+        return instant.withZoneSameInstant(PeriodeHeures.PARIS).format(FORMAT_DATE_HEURE);
     }
 
-    public List<Service> getDailyServices(String userEmail) {
-        User user = userRepository.findByEmail(userEmail)
+    private static ZonedDateTime maintenant() {
+        return ZonedDateTime.now(PeriodeHeures.PARIS);
+    }
+
+    private User userByEmail(String userEmail) {
+        return userRepository.findByEmail(userEmail)
                 .orElseThrow(() -> new RuntimeException("User not found with email: " + userEmail));
+    }
 
-        ZonedDateTime startOfDay = ZonedDateTime.now(ZoneId.of("Europe/Paris")).toLocalDate()
-                .atStartOfDay(ZoneId.of("Europe/Paris"));
-        ZonedDateTime endOfDay = startOfDay.plusDays(1).minusNanos(1);
-
-        return serviceRepository.findByUserAndDebutBetween(user, startOfDay, endOfDay);
+    private User userByUuid(UUID userUuid) {
+        return userRepository.findById(userUuid)
+                .orElseThrow(() -> new RuntimeException("User not found with uuid: " + userUuid));
     }
 }

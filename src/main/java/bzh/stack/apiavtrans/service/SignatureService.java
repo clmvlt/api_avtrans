@@ -28,6 +28,7 @@ public class SignatureService {
     private final SignatureRepository signatureRepository;
     private final UserRepository userRepository;
     private final ServiceRepository serviceRepository;
+    private final TempsTravailService tempsTravailService;
     private final SignatureMapper signatureMapper;
     private final UserMapper userMapper;
 
@@ -102,27 +103,9 @@ public class SignatureService {
 
     private double calculateLastMonthHours(User user) {
         ZonedDateTime now = ZonedDateTime.now(ZoneId.of("Europe/Paris"));
-        YearMonth lastMonth = YearMonth.from(now).minusMonths(1);
 
-        ZonedDateTime lastMonthStart = lastMonth.atDay(1).atStartOfDay(ZoneId.of("Europe/Paris"));
-        ZonedDateTime lastMonthEnd = lastMonth.atEndOfMonth().atTime(23, 59, 59).atZone(ZoneId.of("Europe/Paris"));
-
-        List<bzh.stack.apiavtrans.entity.Service> lastMonthServices =
-                serviceRepository.findByUserAndDebutBetween(user, lastMonthStart, lastMonthEnd);
-
-        long totalSeconds = 0;
-        for (bzh.stack.apiavtrans.entity.Service service : lastMonthServices) {
-            if (service.getDuree() != null) {
-                if (service.getIsBreak()) {
-                    totalSeconds -= service.getDuree();
-                } else {
-                    totalSeconds += service.getDuree();
-                }
-            }
-        }
-
-        double hours = totalSeconds / 3600.0;
-        return Math.round(hours * 100.0) / 100.0;
+        // Services débutés le mois dernier, pauses déduites (même service de nuit à cheval sur deux mois)
+        return tempsTravailService.bilan(user, PeriodeHeures.LASTMONTH.fenetre(now), now).heures();
     }
 
     private boolean checkIfUserNeedsToSign(User user) {
@@ -131,12 +114,9 @@ public class SignatureService {
         YearMonth lastMonth = currentMonth.minusMonths(1);
 
         ZonedDateTime lastMonthStart = lastMonth.atDay(1).atStartOfDay(ZoneId.of("Europe/Paris"));
-        ZonedDateTime lastMonthEnd = lastMonth.atEndOfMonth().atTime(23, 59, 59).atZone(ZoneId.of("Europe/Paris"));
+        ZonedDateTime lastMonthEnd = lastMonth.plusMonths(1).atDay(1).atStartOfDay(ZoneId.of("Europe/Paris"));
 
-        List<bzh.stack.apiavtrans.entity.Service> lastMonthServices =
-                serviceRepository.findByUserAndDebutBetween(user, lastMonthStart, lastMonthEnd);
-
-        if (lastMonthServices.isEmpty()) {
+        if (!serviceRepository.existsServiceTravail(user, lastMonthStart, lastMonthEnd)) {
             return false;
         }
 

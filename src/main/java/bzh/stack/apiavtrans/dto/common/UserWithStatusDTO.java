@@ -1,11 +1,13 @@
 package bzh.stack.apiavtrans.dto.common;
 
+import bzh.stack.apiavtrans.dto.service.HeuresPeriodeDTO;
 import bzh.stack.apiavtrans.dto.service.ServiceDTO;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.time.ZonedDateTime;
 import java.util.UUID;
 
 @Data
@@ -39,9 +41,12 @@ public class UserWithStatusDTO {
             allowableValues = {"PRESENT", "ON_BREAK", "ABSENT"})
     private String status;
 
-    @Schema(description = "Service actif (si présent ou en pause)")
+    @Schema(description = "Service de travail en cours avec ses pauses (si présent ou en pause)")
     private ServiceDTO activeService;
 
-    @Schema(description = "Heures travaillées aujourd'hui", example = "5.5")
-    private Double hoursToday;
+    @Schema(description = "Heures travaillées nettes des services débutés aujourd'hui")
+    private HeuresPeriodeDTO hoursToday;
+
+    @Schema(description = "Instant de calcul (heure serveur)")
+    private ZonedDateTime calculeLe;
 }
