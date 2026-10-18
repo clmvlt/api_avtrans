@@ -3,13 +3,18 @@ package bzh.stack.apiavtrans.entity;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Data;
+import lombok.EqualsAndHashCode;
 import lombok.NoArgsConstructor;
+import lombok.ToString;
 
 import java.time.ZonedDateTime;
 import java.util.UUID;
 
 @Entity
-@Table(name = "services")
+@Table(name = "services", indexes = {
+        @Index(name = "idx_services_service_parent", columnList = "service_parent_uuid"),
+        @Index(name = "idx_services_user_debut", columnList = "user_uuid, debut")
+})
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
@@ -31,6 +36,16 @@ public class Service {
 
     @Column(name = "is_break", nullable = false)
     private Boolean isBreak = false;
+
+    /**
+     * Service de travail auquel appartient une pause (null pour un service de travail).
+     * Une pause compte toujours avec son service, même si elle commence après minuit.
+     */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "service_parent_uuid", foreignKey = @ForeignKey(name = "fk_services_service_parent"))
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
+    private Service serviceParent;
 
     @Column(name = "latitude")
     private Double latitude;
