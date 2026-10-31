@@ -15,7 +15,7 @@ import java.util.UUID;
 public interface EntretienRepository extends JpaRepository<Entretien, UUID>, JpaSpecificationExecutor<Entretien> {
     List<Entretien> findByVehiculeOrderByDateEntretienDesc(Vehicule vehicule);
 
-    @Query("SELECT e FROM Entretien e WHERE e.vehicule = :vehicule AND e.typeEntretien.id = :typeEntretienId ORDER BY e.dateEntretien DESC")
+    @Query("SELECT e FROM Entretien e WHERE e.vehicule = :vehicule AND e.typeEntretien.id = :typeEntretienId ORDER BY e.dateEntretien DESC, e.createdAt DESC")
     List<Entretien> findByVehiculeAndTypeEntretienOrderByDateEntretienDesc(
         @Param("vehicule") Vehicule vehicule,
         @Param("typeEntretienId") UUID typeEntretienId

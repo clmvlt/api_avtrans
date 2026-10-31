@@ -31,6 +31,14 @@ public interface VehiculeKilometrageRepository extends JpaRepository<VehiculeKil
     @Query("SELECT vk FROM VehiculeKilometrage vk WHERE vk.vehicule = :vehicule AND vk.relai IS NULL ORDER BY vk.createdAt DESC LIMIT 1")
     Optional<VehiculeKilometrage> findLatestByVehicule(Vehicule vehicule);
 
+    /** Dernier relevé du véhicule lui-même connu à une date (hors relevés de relais). */
+    @Query("SELECT vk FROM VehiculeKilometrage vk WHERE vk.vehicule = :vehicule AND vk.relai IS NULL AND vk.createdAt <= :date ORDER BY vk.createdAt DESC LIMIT 1")
+    Optional<VehiculeKilometrage> findLatestByVehiculeAtOrBefore(@Param("vehicule") Vehicule vehicule, @Param("date") ZonedDateTime date);
+
+    /** Premier relevé du véhicule lui-même (hors relevés de relais). */
+    @Query("SELECT vk FROM VehiculeKilometrage vk WHERE vk.vehicule = :vehicule AND vk.relai IS NULL ORDER BY vk.createdAt ASC LIMIT 1")
+    Optional<VehiculeKilometrage> findEarliestByVehicule(@Param("vehicule") Vehicule vehicule);
+
     @Query("SELECT vk FROM VehiculeKilometrage vk WHERE vk.relai = :relai ORDER BY vk.createdAt DESC LIMIT 1")
     Optional<VehiculeKilometrage> findLatestByRelai(@Param("relai") VehiculeRelai relai);
 

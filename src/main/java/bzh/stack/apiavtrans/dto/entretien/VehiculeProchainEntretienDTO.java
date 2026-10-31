@@ -6,18 +6,24 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.util.ArrayList;
+import java.util.List;
+
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
-@Schema(description = "Véhicule avec ses prochains entretiens à effectuer (par km et par date)")
+@Schema(description = "Véhicule avec tous ses prochains entretiens à effectuer")
 public class VehiculeProchainEntretienDTO {
 
     @Schema(description = "Informations du véhicule")
     private VehiculeDTO vehicule;
 
-    @Schema(description = "Prochain entretien basé sur le kilométrage (null si aucun)")
+    @Schema(description = "Échéance kilométrique la plus proche (null si aucune)")
     private AlerteEntretienDTO prochainEntretienKm;
 
-    @Schema(description = "Prochain entretien basé sur la date (null si aucun)")
+    @Schema(description = "Échéance par date la plus proche (null si aucune)")
     private AlerteEntretienDTO prochainEntretienDate;
+
+    @Schema(description = "Toutes les échéances des récurrences actives, de la plus urgente à la moins urgente")
+    private List<AlerteEntretienDTO> alertes = new ArrayList<>();
 }

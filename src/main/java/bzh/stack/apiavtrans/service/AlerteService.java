@@ -11,16 +11,29 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
 public class AlerteService {
+
+    private static final ZoneId PARIS = ZoneId.of("Europe/Paris");
+
+    /** Échelles qui rendent comparables une échéance en km et une échéance en jours (seuils « à prévoir » des clients). */
+    private static final double ECHELLE_KM = 10000d;
+    private static final double ECHELLE_JOURS = 90d;
+
+    /** La plus urgente d'abord : retards, puis échéances les plus proches. */
+    private static final Comparator<AlerteEntretienDTO> PAR_URGENCE =
+            Comparator.comparingDouble(AlerteService::urgence);
 
     private final VehiculeRepository vehiculeRepository;
     private final VehiculeKilometrageRepository vehiculeKilometrageRepository;
@@ -39,19 +52,7 @@ public class AlerteService {
                 .findLatestByVehicule(vehicule)
                 .orElse(null);
 
-        Integer kilometrageActuel = latestKm != null ? latestKm.getKm() : 0;
-
-        List<VehiculeTypeEntretien> configurations = vehiculeTypeEntretienRepository.findByVehiculeAndActifTrue(vehicule);
-        List<AlerteEntretienDTO> alertes = new ArrayList<>();
-
-        for (VehiculeTypeEntretien config : configurations) {
-            AlerteEntretienDTO alerte = calculateAlerte(vehicule, latestKm, config, kilometrageActuel);
-            if (alerte != null) {
-                alertes.add(alerte);
-            }
-        }
-
-        return alertes;
+        return buildAlertes(vehicule, latestKm);
     }
 
     @Transactional(readOnly = true)
@@ -64,19 +65,34 @@ public class AlerteService {
                     .findLatestByVehicule(vehicule)
                     .orElse(null);
 
-            Integer kilometrageActuel = latestKm != null ? latestKm.getKm() : 0;
-
-            List<VehiculeTypeEntretien> configurations = vehiculeTypeEntretienRepository.findByVehiculeAndActifTrue(vehicule);
-
-            for (VehiculeTypeEntretien config : configurations) {
-                AlerteEntretienDTO alerte = calculateAlerte(vehicule, latestKm, config, kilometrageActuel);
-                if (alerte != null) {
-                    alertes.add(alerte);
-                }
-            }
+            alertes.addAll(buildAlertes(vehicule, latestKm));
         }
 
         return alertes;
+    }
+
+    /** Une échéance par récurrence active du véhicule, la plus urgente d'abord. */
+    private List<AlerteEntretienDTO> buildAlertes(Vehicule vehicule, VehiculeKilometrage latestKm) {
+        Integer kilometrageActuel = latestKm != null ? latestKm.getKm() : 0;
+
+        List<VehiculeTypeEntretien> configurations = vehiculeTypeEntretienRepository.findByVehiculeAndActifTrue(vehicule);
+        List<AlerteEntretienDTO> alertes = new ArrayList<>();
+
+        for (VehiculeTypeEntretien config : configurations) {
+            AlerteEntretienDTO alerte = calculateAlerte(vehicule, latestKm, config, kilometrageActuel);
+            if (alerte != null) {
+                alertes.add(alerte);
+            }
+        }
+
+        alertes.sort(PAR_URGENCE);
+        return alertes;
+    }
+
+    private static double urgence(AlerteEntretienDTO alerte) {
+        return alerte.getKmRestants() != null
+                ? alerte.getKmRestants() / ECHELLE_KM
+                : alerte.getJoursRestants() / ECHELLE_JOURS;
     }
 
     private AlerteEntretienDTO calculateAlerte(Vehicule vehicule, VehiculeKilometrage latestKm, VehiculeTypeEntretien config, Integer kilometrageActuel) {
@@ -89,9 +105,11 @@ public class AlerteService {
         alerte.setVehicule(vehiculeMapper.toDTO(vehicule, latestKm));
         alerte.setTypeEntretien(typeEntretienMapper.toDTO(config.getTypeEntretien()));
         alerte.setDernierEntretien(dernierEntretien != null ? entretienMapper.toDTO(dernierEntretien) : null);
+        alerte.setPeriodiciteType(config.getPeriodiciteType());
+        alerte.setPeriodiciteValeur(config.getPeriodiciteValeur());
 
         if (config.getPeriodiciteType() == VehiculeTypeEntretien.PeriodiciteType.KILOMETRAGE) {
-            return calculateAlerteKilometrage(alerte, dernierEntretien, config, kilometrageActuel);
+            return calculateAlerteKilometrage(alerte, vehicule, dernierEntretien, config, kilometrageActuel);
         } else if (config.getPeriodiciteType() == VehiculeTypeEntretien.PeriodiciteType.TEMPOREL) {
             return calculateAlerteTemporelle(alerte, dernierEntretien, config);
         }
@@ -99,17 +117,13 @@ public class AlerteService {
         return null;
     }
 
-    private AlerteEntretienDTO calculateAlerteKilometrage(AlerteEntretienDTO alerte, Entretien dernierEntretien,
+    private AlerteEntretienDTO calculateAlerteKilometrage(AlerteEntretienDTO alerte, Vehicule vehicule, Entretien dernierEntretien,
                                                            VehiculeTypeEntretien config, Integer kilometrageActuel) {
-        if (dernierEntretien == null) {
-            alerte.setProchainKilometrage(config.getPeriodiciteValeur());
-            alerte.setKmRestants(config.getPeriodiciteValeur() - kilometrageActuel);
-            alerte.setEnRetard(kilometrageActuel >= config.getPeriodiciteValeur());
-            alerte.setMessage(buildMessageKilometrage(alerte.getKmRestants(), alerte.getEnRetard()));
-            return alerte;
-        }
+        int reference = dernierEntretien != null
+                ? dernierEntretien.getKilometrage()
+                : kilometrageALaCreation(vehicule, config);
 
-        Integer prochainKm = dernierEntretien.getKilometrage() + config.getPeriodiciteValeur();
+        Integer prochainKm = reference + config.getPeriodiciteValeur();
         Integer kmRestants = prochainKm - kilometrageActuel;
 
         alerte.setProchainKilometrage(prochainKm);
@@ -120,25 +134,32 @@ public class AlerteService {
         return alerte;
     }
 
+    /**
+     * Sans entretien réalisé, la récurrence part du kilométrage connu à la création de la configuration
+     * (dernier relevé d'avant, sinon le premier relevé d'après, sinon 0).
+     */
+    private int kilometrageALaCreation(Vehicule vehicule, VehiculeTypeEntretien config) {
+        Optional<VehiculeKilometrage> releve = vehiculeKilometrageRepository
+                .findLatestByVehiculeAtOrBefore(vehicule, config.getCreatedAt());
+        if (releve.isEmpty()) {
+            releve = vehiculeKilometrageRepository.findEarliestByVehicule(vehicule);
+        }
+        return releve.map(VehiculeKilometrage::getKm).orElse(0);
+    }
+
     private AlerteEntretienDTO calculateAlerteTemporelle(AlerteEntretienDTO alerte, Entretien dernierEntretien,
                                                           VehiculeTypeEntretien config) {
-        if (dernierEntretien == null) {
-            ZonedDateTime prochaineDateTemporelle = ZonedDateTime.now().plusDays(config.getPeriodiciteValeur());
-            long joursRestants = ChronoUnit.DAYS.between(ZonedDateTime.now(), prochaineDateTemporelle);
+        // Sans entretien réalisé, la récurrence part de la création de la configuration
+        ZonedDateTime reference = dernierEntretien != null ? dernierEntretien.getDateEntretien() : config.getCreatedAt();
+        ZonedDateTime prochaineDateTemporelle = reference.plusDays(config.getPeriodiciteValeur());
 
-            alerte.setProchaineDateTemporelle(prochaineDateTemporelle);
-            alerte.setJoursRestants(joursRestants);
-            alerte.setEnRetard(false);
-            alerte.setMessage(buildMessageTemporel(joursRestants, false));
-            return alerte;
-        }
-
-        ZonedDateTime prochaineDateTemporelle = dernierEntretien.getDateEntretien().plusDays(config.getPeriodiciteValeur());
-        long joursRestants = ChronoUnit.DAYS.between(ZonedDateTime.now(), prochaineDateTemporelle);
+        LocalDate aujourdhui = LocalDate.now(PARIS);
+        LocalDate echeance = prochaineDateTemporelle.withZoneSameInstant(PARIS).toLocalDate();
+        long joursRestants = ChronoUnit.DAYS.between(aujourdhui, echeance);
 
         alerte.setProchaineDateTemporelle(prochaineDateTemporelle);
         alerte.setJoursRestants(joursRestants);
-        alerte.setEnRetard(joursRestants <= 0);
+        alerte.setEnRetard(joursRestants < 0);
         alerte.setMessage(buildMessageTemporel(joursRestants, alerte.getEnRetard()));
 
         return alerte;
@@ -155,11 +176,17 @@ public class AlerteService {
 
     private String buildMessageTemporel(Long joursRestants, Boolean enRetard) {
         if (enRetard) {
-            return "URGENT : Entretien en retard de " + Math.abs(joursRestants) + " jours";
+            return "URGENT : Entretien en retard de " + libelleJours(Math.abs(joursRestants));
+        } else if (joursRestants == 0) {
+            return "Entretien à prévoir aujourd'hui";
         } else if (joursRestants <= 30) {
-            return "Entretien à prévoir dans " + joursRestants + " jours";
+            return "Entretien à prévoir dans " + libelleJours(joursRestants);
         }
-        return "Prochain entretien dans " + joursRestants + " jours";
+        return "Prochain entretien dans " + libelleJours(joursRestants);
+    }
+
+    private String libelleJours(long jours) {
+        return jours + (jours > 1 ? " jours" : " jour");
     }
 
     @Transactional(readOnly = true)
@@ -187,28 +214,21 @@ public class AlerteService {
                 .findLatestByVehicule(vehicule)
                 .orElse(null);
 
+        List<AlerteEntretienDTO> alertes = buildAlertes(vehicule, latestKm);
+
         VehiculeProchainEntretienDTO dto = new VehiculeProchainEntretienDTO();
         dto.setVehicule(vehiculeMapper.toDTO(vehicule, latestKm));
+        dto.setAlertes(alertes);
 
-        List<AlerteEntretienDTO> alertes = getAlertesForVehicule(vehicule.getId());
-
-        if (!alertes.isEmpty()) {
-            AlerteEntretienDTO prochainKm = alertes.stream()
-                    .filter(a -> a.getKmRestants() != null)
-                    .min(Comparator.comparingInt(AlerteEntretienDTO::getKmRestants))
-                    .orElse(null);
-
-            AlerteEntretienDTO prochainDate = alertes.stream()
-                    .filter(a -> a.getJoursRestants() != null)
-                    .min(Comparator.comparingLong(AlerteEntretienDTO::getJoursRestants))
-                    .orElse(null);
-
-            dto.setProchainEntretienKm(prochainKm);
-            dto.setProchainEntretienDate(prochainDate);
-        } else {
-            dto.setProchainEntretienKm(null);
-            dto.setProchainEntretienDate(null);
-        }
+        // Champs historiques, conservés pour les versions de l'application mobile déjà installées
+        dto.setProchainEntretienKm(alertes.stream()
+                .filter(a -> a.getKmRestants() != null)
+                .min(Comparator.comparingInt(AlerteEntretienDTO::getKmRestants))
+                .orElse(null));
+        dto.setProchainEntretienDate(alertes.stream()
+                .filter(a -> a.getJoursRestants() != null)
+                .min(Comparator.comparingLong(AlerteEntretienDTO::getJoursRestants))
+                .orElse(null));
 
         return dto;
     }
