@@ -7,8 +7,11 @@ import bzh.stack.apiavtrans.entity.Absence.AbsencePeriod;
 import bzh.stack.apiavtrans.entity.Absence.AbsenceStatus;
 import bzh.stack.apiavtrans.entity.AbsenceType;
 import bzh.stack.apiavtrans.entity.User;
+import bzh.stack.apiavtrans.mapper.AbsenceCommentMapper;
 import bzh.stack.apiavtrans.mapper.AbsenceMapper;
 import bzh.stack.apiavtrans.mapper.RoleMapper;
+import bzh.stack.apiavtrans.repository.AbsenceCommentRepository;
+import bzh.stack.apiavtrans.repository.AbsenceCommentRepository.AbsenceCommentCount;
 import bzh.stack.apiavtrans.repository.AbsenceRepository;
 import bzh.stack.apiavtrans.repository.AbsenceSpecifications;
 import bzh.stack.apiavtrans.repository.AbsenceTypeRepository;
@@ -27,6 +30,7 @@ import java.time.format.DateTimeFormatter;
 import java.time.temporal.TemporalAdjusters;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -34,6 +38,8 @@ import java.util.stream.Collectors;
 public class AbsenceService {
 
     private final AbsenceRepository absenceRepository;
+    private final AbsenceCommentRepository absenceCommentRepository;
+    private final AbsenceCommentMapper absenceCommentMapper;
     private final UserRepository userRepository;
     private final AbsenceTypeRepository absenceTypeRepository;
     private final AbsenceMapper absenceMapper;
@@ -45,6 +51,8 @@ public class AbsenceService {
     private String baseApiUrl;
 
     public AbsenceService(AbsenceRepository absenceRepository,
+                          AbsenceCommentRepository absenceCommentRepository,
+                          AbsenceCommentMapper absenceCommentMapper,
                           UserRepository userRepository,
                           AbsenceTypeRepository absenceTypeRepository,
                           AbsenceMapper absenceMapper,
@@ -52,6 +60,8 @@ public class AbsenceService {
                           NotificationService notificationService,
                           HeuresAbsenceCalculator heuresAbsenceCalculator) {
         this.absenceRepository = absenceRepository;
+        this.absenceCommentRepository = absenceCommentRepository;
+        this.absenceCommentMapper = absenceCommentMapper;
         this.userRepository = userRepository;
         this.absenceTypeRepository = absenceTypeRepository;
         this.absenceMapper = absenceMapper;
@@ -194,6 +204,7 @@ public class AbsenceService {
         List<AbsenceDTO> absenceDTOs = absencePage.getContent().stream()
                 .map(absenceMapper::toDTO)
                 .collect(Collectors.toList());
+        fillCommentsSummary(absenceDTOs);
 
         return new AbsenceListResponse(
                 true,
@@ -204,11 +215,35 @@ public class AbsenceService {
         );
     }
 
+    /**
+     * Nombre de commentaires internes et dernier commentaire de chaque absence de la page, en deux
+     * requêtes groupées. Réservé à la recherche administrateur : les autres réponses laissent ces
+     * champs null, donc absents du JSON.
+     */
+    private void fillCommentsSummary(List<AbsenceDTO> absences) {
+        if (absences.isEmpty()) {
+            return;
+        }
+
+        List<UUID> absenceUuids = absences.stream().map(AbsenceDTO::getUuid).toList();
+        Map<UUID, Long> counts = absenceCommentRepository.countByAbsenceUuids(absenceUuids).stream()
+                .collect(Collectors.toMap(AbsenceCommentCount::getAbsenceUuid, AbsenceCommentCount::getCommentsCount));
+        Map<UUID, AbsenceCommentDTO> latest = absenceCommentRepository.findLatestByAbsenceUuids(absenceUuids).stream()
+                .map(absenceCommentMapper::toDTO)
+                .collect(Collectors.toMap(AbsenceCommentDTO::getAbsenceUuid, comment -> comment, (first, same) -> first));
+
+        absences.forEach(absence -> {
+            absence.setCommentsCount(counts.getOrDefault(absence.getUuid(), 0L));
+            absence.setLastComment(latest.get(absence.getUuid()));
+        });
+    }
+
     @Transactional
     public AbsenceResponse deleteAbsenceByAdmin(UUID absenceUuid) {
         Absence absence = absenceRepository.findById(absenceUuid)
                 .orElseThrow(() -> new RuntimeException("Absence non trouvée"));
 
+        absenceCommentRepository.deleteByAbsenceUuid(absenceUuid);
         absenceRepository.delete(absence);
 
         return new AbsenceResponse(true, "Absence supprimée avec succès", null);
@@ -265,6 +300,7 @@ public class AbsenceService {
             return new AbsenceResponse(false, "Seules les absences en attente peuvent être annulées", null);
         }
 
+        absenceCommentRepository.deleteByAbsenceUuid(absenceUuid);
         absenceRepository.delete(absence);
 
         return new AbsenceResponse(true, "Absence annulée avec succès", null);

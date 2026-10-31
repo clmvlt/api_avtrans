@@ -18,6 +18,7 @@ import bzh.stack.apiavtrans.mapper.VehiculeKilometrageMapper;
 import bzh.stack.apiavtrans.entity.Role;
 import bzh.stack.apiavtrans.entity.User;
 import bzh.stack.apiavtrans.mapper.UserMapper;
+import bzh.stack.apiavtrans.repository.AbsenceCommentRepository;
 import bzh.stack.apiavtrans.repository.AbsenceRepository;
 import bzh.stack.apiavtrans.repository.AcompteRepository;
 import bzh.stack.apiavtrans.repository.CouchetteRepository;
@@ -65,6 +66,7 @@ public class UserService {
     private final EmailVerificationRepository emailVerificationRepository;
     private final PasswordResetTokenRepository passwordResetTokenRepository;
     private final AbsenceRepository absenceRepository;
+    private final AbsenceCommentRepository absenceCommentRepository;
     private final AcompteRepository acompteRepository;
     private final SignatureRepository signatureRepository;
     private final RapportVehiculeRepository rapportVehiculeRepository;
@@ -119,6 +121,7 @@ public class UserService {
 
         // Set user to null for related data to keep history
         absenceRepository.setValidatedByToNull(user);
+        absenceCommentRepository.setAuthorToNull(user);
         acompteRepository.setValidatedByToNull(user);
         vehiculeKilometrageRepository.setUserToNull(user);
         serviceRepository.setModifiedByToNull(user);
@@ -135,6 +138,7 @@ public class UserService {
         serviceRepository.deleteServicesByUser(user);
         emailVerificationRepository.deleteByUser(user);
         passwordResetTokenRepository.deleteByUser(user);
+        absenceCommentRepository.deleteByAbsenceUser(user);
         absenceRepository.deleteByUser(user);
         acompteRepository.deleteByUser(user);
         signatureRepository.deleteByUser(user);

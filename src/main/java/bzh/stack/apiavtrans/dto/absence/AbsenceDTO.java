@@ -1,6 +1,7 @@
 package bzh.stack.apiavtrans.dto.absence;
 
 import bzh.stack.apiavtrans.dto.common.UserDTO;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.AllArgsConstructor;
 import lombok.Data;
@@ -49,4 +50,14 @@ public class AbsenceDTO {
 
     @Schema(description = "L'employé a-t-il des heures de contrat renseignées ? (sinon 0 h)", example = "true")
     private Boolean contratRenseigne;
+
+    @Schema(description = "Nombre de commentaires internes : uniquement dans la recherche administrateur "
+            + "(/absences/admin/search), absent de toutes les autres réponses", example = "2")
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private Long commentsCount;
+
+    @Schema(description = "Dernier commentaire interne : uniquement dans la recherche administrateur "
+            + "(/absences/admin/search), absent de toutes les autres réponses")
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private AbsenceCommentDTO lastComment;
 }

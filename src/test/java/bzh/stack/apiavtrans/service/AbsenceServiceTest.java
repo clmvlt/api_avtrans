@@ -1,31 +1,44 @@
 package bzh.stack.apiavtrans.service;
 
+import bzh.stack.apiavtrans.dto.absence.AbsenceCommentDTO;
 import bzh.stack.apiavtrans.dto.absence.AbsenceDTO;
 import bzh.stack.apiavtrans.dto.absence.AbsenceDecompteDTO;
 import bzh.stack.apiavtrans.dto.absence.AbsenceDecompteRequest;
 import bzh.stack.apiavtrans.dto.absence.AbsenceDecompteResponse;
 import bzh.stack.apiavtrans.dto.absence.AbsenceHeuresRequest;
+import bzh.stack.apiavtrans.dto.absence.AbsenceListResponse;
 import bzh.stack.apiavtrans.dto.absence.AbsenceResponse;
+import bzh.stack.apiavtrans.dto.absence.AbsenceSearchRequest;
 import bzh.stack.apiavtrans.dto.absence.AdminAbsenceUpdateRequest;
 import bzh.stack.apiavtrans.dto.absence.PlanningResponse;
 import bzh.stack.apiavtrans.entity.Absence;
 import bzh.stack.apiavtrans.entity.Absence.AbsencePeriod;
 import bzh.stack.apiavtrans.entity.Absence.AbsenceStatus;
+import bzh.stack.apiavtrans.entity.AbsenceComment;
 import bzh.stack.apiavtrans.entity.AbsenceType;
 import bzh.stack.apiavtrans.entity.AbsenceType.ModeDecompte;
 import bzh.stack.apiavtrans.entity.User;
+import bzh.stack.apiavtrans.mapper.AbsenceCommentMapper;
 import bzh.stack.apiavtrans.mapper.AbsenceMapper;
 import bzh.stack.apiavtrans.mapper.RoleMapper;
+import bzh.stack.apiavtrans.repository.AbsenceCommentRepository;
+import bzh.stack.apiavtrans.repository.AbsenceCommentRepository.AbsenceCommentCount;
 import bzh.stack.apiavtrans.repository.AbsenceRepository;
 import bzh.stack.apiavtrans.repository.AbsenceTypeRepository;
 import bzh.stack.apiavtrans.repository.UserRepository;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentMatchers;
+import org.mockito.InOrder;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
 
 import java.time.LocalDate;
 import java.util.ArrayList;
@@ -36,8 +49,11 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -45,6 +61,10 @@ class AbsenceServiceTest {
 
     @Mock
     private AbsenceRepository absenceRepository;
+    @Mock
+    private AbsenceCommentRepository absenceCommentRepository;
+    @Mock
+    private AbsenceCommentMapper absenceCommentMapper;
     @Mock
     private UserRepository userRepository;
     @Mock
@@ -159,6 +179,121 @@ class AbsenceServiceTest {
         absenceService.updateAbsenceByAdmin(absence.getUuid(), request);
 
         assertThat(absence.getHeuresForcees()).isEqualTo(20.0);
+    }
+
+    // ── Commentaires internes ──
+
+    @Test
+    void should_fill_comments_count_with_one_grouped_query_when_admin_searches() {
+        Absence sansCommentaire = new Absence();
+        sansCommentaire.setUuid(UUID.randomUUID());
+        when(absenceRepository.findAll(ArgumentMatchers.<Specification<Absence>>any(), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(absence, sansCommentaire)));
+        when(absenceMapper.toDTO(any(Absence.class))).thenAnswer(inv -> dtoOf(inv.getArgument(0)));
+        when(absenceCommentRepository.countByAbsenceUuids(List.of(absence.getUuid(), sansCommentaire.getUuid())))
+                .thenReturn(List.of(commentCount(absence.getUuid(), 3)));
+
+        AbsenceListResponse response = absenceService.getAllAbsences(new AbsenceSearchRequest());
+
+        assertThat(response.getAbsences()).extracting(AbsenceDTO::getCommentsCount).containsExactly(3L, 0L);
+        verify(absenceCommentRepository, times(1)).countByAbsenceUuids(any());
+    }
+
+    @Test
+    void should_fill_last_comment_only_for_commented_absences_when_admin_search() {
+        Absence sansCommentaire = new Absence();
+        sansCommentaire.setUuid(UUID.randomUUID());
+        AbsenceComment comment = new AbsenceComment();
+        AbsenceCommentDTO commentDTO = new AbsenceCommentDTO();
+        commentDTO.setAbsenceUuid(absence.getUuid());
+        commentDTO.setContent("Justificatif reçu");
+        when(absenceRepository.findAll(ArgumentMatchers.<Specification<Absence>>any(), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(absence, sansCommentaire)));
+        when(absenceMapper.toDTO(any(Absence.class))).thenAnswer(inv -> dtoOf(inv.getArgument(0)));
+        when(absenceCommentRepository.findLatestByAbsenceUuids(List.of(absence.getUuid(), sansCommentaire.getUuid())))
+                .thenReturn(List.of(comment));
+        when(absenceCommentMapper.toDTO(comment)).thenReturn(commentDTO);
+
+        AbsenceListResponse response = absenceService.getAllAbsences(new AbsenceSearchRequest());
+
+        assertThat(response.getAbsences().get(0).getLastComment().getContent()).isEqualTo("Justificatif reçu");
+        assertThat(response.getAbsences().get(1).getLastComment()).isNull();
+        verify(absenceCommentRepository, times(1)).findLatestByAbsenceUuids(any());
+    }
+
+    @Test
+    void should_not_query_comments_count_when_admin_search_page_is_empty() {
+        when(absenceRepository.findAll(ArgumentMatchers.<Specification<Absence>>any(), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of()));
+
+        AbsenceListResponse response = absenceService.getAllAbsences(new AbsenceSearchRequest());
+
+        assertThat(response.getAbsences()).isEmpty();
+        verifyNoInteractions(absenceCommentRepository);
+    }
+
+    @Test
+    void should_leave_comments_count_null_when_employee_lists_own_absences() {
+        when(userRepository.findByEmail(employe.getEmail())).thenReturn(Optional.of(employe));
+        when(absenceRepository.findAll(ArgumentMatchers.<Specification<Absence>>any(), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(absence)));
+        when(absenceMapper.toDTO(any(Absence.class))).thenAnswer(inv -> dtoOf(inv.getArgument(0)));
+
+        AbsenceListResponse response = absenceService.getMyAbsences(employe.getEmail(), new AbsenceSearchRequest());
+
+        assertThat(response.getAbsences()).extracting(AbsenceDTO::getCommentsCount).containsOnlyNulls();
+        verifyNoInteractions(absenceCommentRepository);
+    }
+
+    @Test
+    void should_omit_comments_count_from_json_when_null() throws Exception {
+        String json = new ObjectMapper().writeValueAsString(new AbsenceDTO());
+
+        assertThat(json).doesNotContain("commentsCount").doesNotContain("lastComment");
+    }
+
+    @Test
+    void should_delete_comments_before_absence_when_admin_deletes_absence() {
+        when(absenceRepository.findById(absence.getUuid())).thenReturn(Optional.of(absence));
+
+        absenceService.deleteAbsenceByAdmin(absence.getUuid());
+
+        InOrder order = inOrder(absenceCommentRepository, absenceRepository);
+        order.verify(absenceCommentRepository).deleteByAbsenceUuid(absence.getUuid());
+        order.verify(absenceRepository).delete(absence);
+    }
+
+    @Test
+    void should_delete_comments_before_absence_when_employee_cancels_absence() {
+        when(userRepository.findByEmail(employe.getEmail())).thenReturn(Optional.of(employe));
+        when(absenceRepository.findById(absence.getUuid())).thenReturn(Optional.of(absence));
+
+        AbsenceResponse response = absenceService.cancelAbsence(absence.getUuid(), employe.getEmail());
+
+        assertThat(response.isSuccess()).isTrue();
+        InOrder order = inOrder(absenceCommentRepository, absenceRepository);
+        order.verify(absenceCommentRepository).deleteByAbsenceUuid(absence.getUuid());
+        order.verify(absenceRepository).delete(absence);
+    }
+
+    private static AbsenceDTO dtoOf(Absence source) {
+        AbsenceDTO dto = new AbsenceDTO();
+        dto.setUuid(source.getUuid());
+        return dto;
+    }
+
+    private static AbsenceCommentCount commentCount(UUID absenceUuid, long count) {
+        return new AbsenceCommentCount() {
+            @Override
+            public UUID getAbsenceUuid() {
+                return absenceUuid;
+            }
+
+            @Override
+            public long getCommentsCount() {
+                return count;
+            }
+        };
     }
 
     // ── Planning ──

@@ -4,6 +4,7 @@ import bzh.stack.apiavtrans.annotation.RequireRole;
 import bzh.stack.apiavtrans.dto.absence.*;
 import bzh.stack.apiavtrans.dto.common.ErrorResponse;
 import bzh.stack.apiavtrans.entity.User;
+import bzh.stack.apiavtrans.service.AbsenceCommentService;
 import bzh.stack.apiavtrans.service.AbsenceService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -28,6 +29,7 @@ import java.util.UUID;
 public class AbsenceController {
 
         private final AbsenceService absenceService;
+        private final AbsenceCommentService absenceCommentService;
 
         @RequireRole("Utilisateur")
         @Operation(summary = "[UTILISATEUR] Create an absence request")
@@ -304,6 +306,103 @@ public class AbsenceController {
                         @RequestBody(required = false) AbsenceHeuresRequest request) {
                 try {
                         AbsenceResponse response = absenceService.setHeuresForcees(uuid, request);
+
+                        if (!response.isSuccess()) {
+                                return ResponseEntity.badRequest()
+                                                .body(new ErrorResponse(false, response.getMessage()));
+                        }
+
+                        return ResponseEntity.ok(response);
+                } catch (RuntimeException e) {
+                        return ResponseEntity.badRequest().body(new ErrorResponse(false, e.getMessage()));
+                }
+        }
+
+        @RequireRole("Administrateur")
+        @Operation(summary = "[ADMINISTRATEUR] Get the internal comments of an absence",
+                description = "Commentaires visibles uniquement par les administrateurs, du plus ancien au plus récent.")
+        @ApiResponse(responseCode = "200", description = "Comments retrieved successfully",
+                        content = @Content(schema = @Schema(implementation = AbsenceCommentListResponse.class)))
+        @ApiResponse(responseCode = "400", description = "Absence not found",
+                        content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+        @GetMapping("/{uuid}/comments")
+        public ResponseEntity<?> getAbsenceComments(
+                        @Parameter(description = "Absence UUID") @PathVariable UUID uuid) {
+                try {
+                        return ResponseEntity.ok(absenceCommentService.getComments(uuid));
+                } catch (RuntimeException e) {
+                        return ResponseEntity.badRequest().body(new ErrorResponse(false, e.getMessage()));
+                }
+        }
+
+        @RequireRole("Administrateur")
+        @Operation(summary = "[ADMINISTRATEUR] Add an internal comment to an absence",
+                description = "Contenu sans les espaces de début et de fin, non vide, 2000 caractères au plus.")
+        @ApiResponse(responseCode = "200", description = "Comment created successfully",
+                        content = @Content(schema = @Schema(implementation = AbsenceCommentResponse.class)))
+        @ApiResponse(responseCode = "400", description = "Empty or too long content, or absence not found",
+                        content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+        @PostMapping("/{uuid}/comments")
+        public ResponseEntity<?> createAbsenceComment(
+                        @Parameter(description = "Absence UUID") @PathVariable UUID uuid,
+                        @RequestBody AbsenceCommentCreateRequest request,
+                        HttpServletRequest httpRequest) {
+                try {
+                        User admin = (User) httpRequest.getAttribute("user");
+                        AbsenceCommentResponse response = absenceCommentService.createComment(uuid, admin.getEmail(), request);
+
+                        if (!response.isSuccess()) {
+                                return ResponseEntity.badRequest()
+                                                .body(new ErrorResponse(false, response.getMessage()));
+                        }
+
+                        return ResponseEntity.ok(response);
+                } catch (RuntimeException e) {
+                        return ResponseEntity.badRequest().body(new ErrorResponse(false, e.getMessage()));
+                }
+        }
+
+        @RequireRole("Administrateur")
+        @Operation(summary = "[ADMINISTRATEUR] Update one of my internal comments",
+                description = "Réservé à l'auteur du commentaire. Mêmes règles de contenu qu'à la création.")
+        @ApiResponse(responseCode = "200", description = "Comment updated successfully",
+                        content = @Content(schema = @Schema(implementation = AbsenceCommentResponse.class)))
+        @ApiResponse(responseCode = "400", description = "Not the author, empty or too long content, or comment not found",
+                        content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+        @PutMapping("/comments/{id}")
+        public ResponseEntity<?> updateAbsenceComment(
+                        @Parameter(description = "Comment UUID") @PathVariable UUID id,
+                        @RequestBody AbsenceCommentUpdateRequest request,
+                        HttpServletRequest httpRequest) {
+                try {
+                        User admin = (User) httpRequest.getAttribute("user");
+                        AbsenceCommentResponse response = absenceCommentService.updateComment(id, admin.getEmail(), request);
+
+                        if (!response.isSuccess()) {
+                                return ResponseEntity.badRequest()
+                                                .body(new ErrorResponse(false, response.getMessage()));
+                        }
+
+                        return ResponseEntity.ok(response);
+                } catch (RuntimeException e) {
+                        return ResponseEntity.badRequest().body(new ErrorResponse(false, e.getMessage()));
+                }
+        }
+
+        @RequireRole("Administrateur")
+        @Operation(summary = "[ADMINISTRATEUR] Delete one of my internal comments",
+                description = "Réservé à l'auteur du commentaire.")
+        @ApiResponse(responseCode = "200", description = "Comment deleted successfully",
+                        content = @Content(schema = @Schema(implementation = AbsenceCommentResponse.class)))
+        @ApiResponse(responseCode = "400", description = "Not the author, or comment not found",
+                        content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+        @DeleteMapping("/comments/{id}")
+        public ResponseEntity<?> deleteAbsenceComment(
+                        @Parameter(description = "Comment UUID") @PathVariable UUID id,
+                        HttpServletRequest httpRequest) {
+                try {
+                        User admin = (User) httpRequest.getAttribute("user");
+                        AbsenceCommentResponse response = absenceCommentService.deleteComment(id, admin.getEmail());
 
                         if (!response.isSuccess()) {
                                 return ResponseEntity.badRequest()
