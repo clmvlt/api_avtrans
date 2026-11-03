@@ -24,6 +24,7 @@ import java.io.ByteArrayInputStream;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -155,6 +156,24 @@ class ExportServiceTest {
 
         assertThat(findRow(sheet, "13/10/2026").getCell(7).getStringCellValue()).isEqualTo("Suite du service du 12/10/2026");
         assertThat(findRow(sheet, "14/10/2026").getCell(7).getStringCellValue()).isEmpty();
+    }
+
+    @Test
+    void should_round_totals_on_exact_sum_when_daily_hours_have_more_than_two_decimals() throws Exception {
+        // 22 jours ouvrés de 7 h 07 (7,1167 h) : l'API donne 156,57 h, pas 22 × 7,12 = 156,64 h
+        List<Service> travaux = new ArrayList<>();
+        for (int jour = 1; jour <= 31; jour++) {
+            if (LocalDate.of(2026, 10, jour).getDayOfWeek().getValue() <= 5) {
+                travaux.add(travail(at(jour, 8, 0), at(jour, 15, 7)));
+            }
+        }
+
+        Sheet sheet = exporter(travaux, List.of());
+
+        assertThat(findRow(sheet, "05/10/2026").getCell(6).getNumericCellValue()).isCloseTo(7.1167, within(0.0001));
+        assertThat(findRow(sheet, "Total semaine (05/10 – 11/10)").getCell(6).getNumericCellValue())
+                .isEqualTo(35.58);
+        assertThat(findRow(sheet, "TOTAL DU MOIS").getCell(6).getNumericCellValue()).isEqualTo(156.57);
     }
 
     private Sheet exporter(List<Service> travaux, List<Service> pauses) throws Exception {

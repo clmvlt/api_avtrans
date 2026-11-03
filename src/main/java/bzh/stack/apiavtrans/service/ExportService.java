@@ -253,8 +253,8 @@ public class ExportService {
         int firstColumnHeaderRow = rowNum;
         rowNum = writeColumnHeaders(sheet, rowNum, columnHeaderStyle);
 
-        // Suivi des sous-totaux hebdomadaires (lignes Excel des cellules de total semaine du mois courant)
-        List<Integer> monthWeekSubtotalRows = new ArrayList<>();
+        // Lignes Excel des jours de chaque semaine du mois courant ({première, dernière}) pour le total du mois
+        List<int[]> monthDayRanges = new ArrayList<>();
         int weekStartExcelRow = -1;
         int weekEndExcelRow = -1;
         LocalDate weekStartDate = null;
@@ -267,17 +267,16 @@ public class ExportService {
             if (!dayMonth.equals(currentMonth)) {
                 // Clôture de la semaine ouverte puis du mois précédent : total + signature
                 if (weekStartExcelRow != -1) {
-                    int subRow = rowNum + 1;
                     rowNum = writeWeekSubtotalRow(sheet, rowNum, weekStartExcelRow, weekEndExcelRow,
                             weekStartDate, weekEndDate, weekLabelStyle, weekValueStyle);
-                    monthWeekSubtotalRows.add(subRow);
+                    monthDayRanges.add(new int[]{weekStartExcelRow, weekEndExcelRow});
                     weekStartExcelRow = -1;
                 }
-                rowNum = writeMonthTotalRow(sheet, rowNum, monthWeekSubtotalRows, totalLabelStyle, totalValueStyle);
+                rowNum = writeMonthTotalRow(sheet, rowNum, monthDayRanges, totalLabelStyle, totalValueStyle);
                 rowNum = writeSignatureSection(sheet, workbook, user, currentMonth, rowNum,
                         signatureBarStyle, signatureLabelStyle, dataStyle);
                 currentMonth = dayMonth;
-                monthWeekSubtotalRows.clear();
+                monthDayRanges.clear();
                 currentWeekMonday = null;
                 // Nouveau mois
                 rowNum = writeSectionHeader(sheet, rowNum, "Heures — ", currentMonth, monthHeaderStyle);
@@ -287,10 +286,9 @@ public class ExportService {
             // Changement de semaine ISO (lundi) à l'intérieur du mois → flush sous-total
             LocalDate weekMonday = currentDate.minusDays(currentDate.getDayOfWeek().getValue() - 1);
             if (currentWeekMonday != null && !weekMonday.equals(currentWeekMonday) && weekStartExcelRow != -1) {
-                int subRow = rowNum + 1;
                 rowNum = writeWeekSubtotalRow(sheet, rowNum, weekStartExcelRow, weekEndExcelRow,
                         weekStartDate, weekEndDate, weekLabelStyle, weekValueStyle);
-                monthWeekSubtotalRows.add(subRow);
+                monthDayRanges.add(new int[]{weekStartExcelRow, weekEndExcelRow});
                 weekStartExcelRow = -1;
             }
             currentWeekMonday = weekMonday;
@@ -476,12 +474,11 @@ public class ExportService {
 
         // Clôture du dernier mois : semaine restante + total + signature
         if (weekStartExcelRow != -1) {
-            int subRow = rowNum + 1;
             rowNum = writeWeekSubtotalRow(sheet, rowNum, weekStartExcelRow, weekEndExcelRow,
                     weekStartDate, weekEndDate, weekLabelStyle, weekValueStyle);
-            monthWeekSubtotalRows.add(subRow);
+            monthDayRanges.add(new int[]{weekStartExcelRow, weekEndExcelRow});
         }
-        rowNum = writeMonthTotalRow(sheet, rowNum, monthWeekSubtotalRows, totalLabelStyle, totalValueStyle);
+        rowNum = writeMonthTotalRow(sheet, rowNum, monthDayRanges, totalLabelStyle, totalValueStyle);
         rowNum = writeSignatureSection(sheet, workbook, user, currentMonth, rowNum,
                 signatureBarStyle, signatureLabelStyle, dataStyle);
 
@@ -541,8 +538,10 @@ public class ExportService {
         }
         sheet.addMergedRegion(new CellRangeAddress(rowNum, rowNum, 0, 5));
 
+        List<int[]> week = List.<int[]>of(new int[]{weekStartExcelRow, weekEndExcelRow});
+
         Cell value = row.createCell(6);
-        value.setCellFormula("SUM(G" + weekStartExcelRow + ":G" + weekEndExcelRow + ")");
+        value.setCellFormula(roundedSum("G", week));
         value.setCellStyle(valueStyle);
 
         for (int i = 7; i < CREDIT_COLUMN; i++) {
@@ -550,13 +549,13 @@ public class ExportService {
         }
 
         Cell credit = row.createCell(CREDIT_COLUMN);
-        credit.setCellFormula("SUM(K" + weekStartExcelRow + ":K" + weekEndExcelRow + ")");
+        credit.setCellFormula(roundedSum("K", week));
         credit.setCellStyle(valueStyle);
 
         return rowNum + 1;
     }
 
-    private int writeMonthTotalRow(Sheet sheet, int rowNum, List<Integer> weekSubtotalRows,
+    private int writeMonthTotalRow(Sheet sheet, int rowNum, List<int[]> dayRanges,
                                    CellStyle labelStyle, CellStyle valueStyle) {
         Row row = sheet.createRow(rowNum);
 
@@ -569,8 +568,8 @@ public class ExportService {
         sheet.addMergedRegion(new CellRangeAddress(rowNum, rowNum, 0, 5));
 
         Cell value = row.createCell(6);
-        if (!weekSubtotalRows.isEmpty()) {
-            value.setCellFormula(sumOfCells("G", weekSubtotalRows));
+        if (!dayRanges.isEmpty()) {
+            value.setCellFormula(roundedSum("G", dayRanges));
         }
         value.setCellStyle(valueStyle);
 
@@ -579,8 +578,8 @@ public class ExportService {
         }
 
         Cell credit = row.createCell(CREDIT_COLUMN);
-        if (!weekSubtotalRows.isEmpty()) {
-            credit.setCellFormula(sumOfCells("K", weekSubtotalRows));
+        if (!dayRanges.isEmpty()) {
+            credit.setCellFormula(roundedSum("K", dayRanges));
         }
         credit.setCellStyle(valueStyle);
 
@@ -606,16 +605,16 @@ public class ExportService {
         return rowNum + 2;
     }
 
-    private String sumOfCells(String column, List<Integer> excelRows) {
-        StringBuilder sb = new StringBuilder("SUM(");
-        for (int i = 0; i < excelRows.size(); i++) {
-            if (i > 0) {
-                sb.append(",");
-            }
-            sb.append(column).append(excelRows.get(i));
+    /**
+     * ROUND(SUM(G5:G8,G10:G16,…),2) : total arrondi une seule fois sur la somme exacte des jours, comme l'API
+     * (additionner des valeurs déjà arrondies ferait dériver le total de quelques centièmes).
+     */
+    private String roundedSum(String column, List<int[]> excelRowRanges) {
+        StringJoiner ranges = new StringJoiner(",", "ROUND(SUM(", "),2)");
+        for (int[] range : excelRowRanges) {
+            ranges.add(column + range[0] + ":" + column + range[1]);
         }
-        sb.append(")");
-        return sb.toString();
+        return ranges.toString();
     }
 
     /** Colonne K : heures créditées du jour (valeur non arrondie, affichée à 2 décimales). */
@@ -799,12 +798,13 @@ public class ExportService {
     // ── Formules ──
 
     /**
-     * ROUND(((F-C)-(E-D)-K)*24, 2) : amplitude de la journée moins la pause principale, moins une constante K
+     * ((F-C)-(E-D)-K)*24 : amplitude de la journée moins la pause principale, moins une constante K
      * (autres pauses, interruptions entre services, changement d'heure) calculée pour que le résultat soit
-     * exactement le temps net de l'API. Modifier les heures dans Excel recalcule toujours le total.
+     * exactement le temps net de l'API. Valeur non arrondie, affichée à 2 décimales : les totaux arrondissent
+     * la somme exacte. Modifier les heures dans Excel recalcule toujours le total.
      */
     private String buildHoursFormula(int excelRow, DayData dayData, BreakPeriod longestBreak) {
-        String formula = "ROUND(((F" + excelRow + "-C" + excelRow + ")";
+        String formula = "((F" + excelRow + "-C" + excelRow + ")";
 
         long wallSeconds = wallSeconds(dayData.workStart, dayData.workEnd);
         if (longestBreak != null) {
@@ -818,7 +818,7 @@ public class ExportService {
             formula += (correctionSeconds > 0 ? "-" : "+") + String.format(Locale.US, "%.10f", correctionDays);
         }
 
-        formula += ")*24,2)";
+        formula += ")*24";
         return formula;
     }
 
