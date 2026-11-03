@@ -313,7 +313,7 @@ public class ExportService {
 
             DayData dayData = dayDataMap.get(currentDate);
             List<Absence> dayAbsences = absenceByDay.get(currentDate);
-            boolean conflict = dayAbsences != null && !dayAbsences.isEmpty() && dayData != null;
+            boolean conflict = dayData != null && coversWholeDay(dayAbsences);
             String typeHex = singleAbsenceColor(dayAbsences);
             String absenceText = buildAbsenceText(dayAbsences);
             if (conflict && !absenceText.isEmpty()) {
@@ -762,7 +762,7 @@ public class ExportService {
                 "Suite d'un service commencé un jour précédent (heures comptées le jour de début)");
         CellStyle conflictSample = buildAbsenceStyle(workbook, styleCache, null, false, true);
         rowNum = legendItem(sheet, rowNum, conflictSample,
-                "Conflit : pointage et absence le même jour (à vérifier)");
+                "Conflit : pointage un jour d'absence en journée complète (à vérifier)");
         rowNum = legendText(sheet, rowNum,
                 "Un service compte en entier, pauses déduites, sur son jour de début (y compris un service de nuit)");
         rowNum = legendText(sheet, rowNum,
@@ -1195,6 +1195,27 @@ public class ExportService {
             }
             return style;
         });
+    }
+
+    /**
+     * Absence(s) couvrant toute la journée (journée complète, ou matin + après-midi) : un pointage ce jour-là
+     * est un conflit. Une demi-journée d'absence travaillée l'autre moitié est normale.
+     */
+    private boolean coversWholeDay(List<Absence> absences) {
+        if (absences == null || absences.isEmpty()) {
+            return false;
+        }
+        boolean morning = false;
+        boolean afternoon = false;
+        for (Absence absence : absences) {
+            Absence.AbsencePeriod period = absence.getPeriod();
+            if (period == null || period == Absence.AbsencePeriod.FULL_DAY) {
+                return true;
+            }
+            morning |= period == Absence.AbsencePeriod.MORNING;
+            afternoon |= period == Absence.AbsencePeriod.AFTERNOON;
+        }
+        return morning && afternoon;
     }
 
     private String singleAbsenceColor(List<Absence> absences) {

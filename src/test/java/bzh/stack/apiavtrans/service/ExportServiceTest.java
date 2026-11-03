@@ -199,7 +199,24 @@ class ExportServiceTest {
         }
     }
 
+    @Test
+    void should_not_flag_conflict_when_user_works_the_other_half_of_a_half_day_absence() throws Exception {
+        Service apresMidi = travail(at(12, 13, 0), at(12, 17, 0));
+        Service jourEntier = travail(at(13, 8, 0), at(13, 12, 0));
+
+        Sheet sheet = exporter(List.of(apresMidi, jourEntier), List.of(),
+                List.of(absence(12, Absence.AbsencePeriod.MORNING), absence(13, Absence.AbsencePeriod.FULL_DAY)));
+
+        assertThat(findRow(sheet, "12/10/2026").getCell(9).getStringCellValue())
+                .isEqualTo("Congés payés — Demi-journée (matin)");
+        assertThat(findRow(sheet, "13/10/2026").getCell(9).getStringCellValue()).startsWith("⚠ Conflit pointage");
+    }
+
     private Sheet exporter(List<Service> travaux, List<Service> pauses) throws Exception {
+        return exporter(travaux, pauses, List.of());
+    }
+
+    private Sheet exporter(List<Service> travaux, List<Service> pauses, List<Absence> absences) throws Exception {
         LocalDate start = LocalDate.of(2026, 10, 1);
         LocalDate end = LocalDate.of(2026, 10, 31);
         when(userRepository.findAllById(List.of(employe.getUuid()))).thenReturn(List.of(employe));
@@ -207,7 +224,7 @@ class ExportServiceTest {
         if (!travaux.isEmpty()) {
             when(serviceRepository.findPausesDe(any())).thenReturn(pauses);
         }
-        when(absenceRepository.findApprovedByUserAndDateRange(employe, start.minusDays(1), end)).thenReturn(List.of());
+        when(absenceRepository.findApprovedByUserAndDateRange(employe, start.minusDays(1), end)).thenReturn(absences);
         when(signatureRepository.findByUserAndDateBetweenOrderByDateDesc(eq(employe), any(), any()))
                 .thenReturn(List.of());
 
@@ -224,6 +241,19 @@ class ExportServiceTest {
         service.setFin(fin);
         service.setIsBreak(false);
         return service;
+    }
+
+    private Absence absence(int jourOctobre, Absence.AbsencePeriod periode) {
+        AbsenceType conges = new AbsenceType();
+        conges.setName("Congés payés");
+        Absence absence = new Absence();
+        absence.setUser(employe);
+        absence.setAbsenceType(conges);
+        absence.setStartDate(LocalDate.of(2026, 10, jourOctobre));
+        absence.setEndDate(LocalDate.of(2026, 10, jourOctobre));
+        absence.setPeriod(periode);
+        absence.setStatus(Absence.AbsenceStatus.APPROVED);
+        return absence;
     }
 
     private Service pauseDe(Service parent, ZonedDateTime debut, ZonedDateTime fin) {
