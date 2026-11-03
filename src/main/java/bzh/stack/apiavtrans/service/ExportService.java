@@ -455,9 +455,13 @@ public class ExportService {
                         }
                     }
 
-                    CellStyle wrapTextStyle = workbook.createCellStyle();
-                    wrapTextStyle.cloneStyleFrom(dataCellStyleToUse);
-                    wrapTextStyle.setWrapText(true);
+                    // Style partagé (un style par cellule finirait par dépasser la limite d'Excel sur un long export)
+                    CellStyle wrapTextStyle = styleCache.computeIfAbsent("WRAP|" + baseKey, k -> {
+                        CellStyle s = workbook.createCellStyle();
+                        s.cloneStyleFrom(dataCellStyleToUse);
+                        s.setWrapText(true);
+                        return s;
+                    });
 
                     otherBreaksCell.setCellValue(otherBreaks.toString());
                     otherBreaksCell.setCellStyle(wrapTextStyle);
