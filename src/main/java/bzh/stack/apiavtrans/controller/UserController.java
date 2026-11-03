@@ -7,6 +7,7 @@ import bzh.stack.apiavtrans.dto.notification.UpdateNotificationPreferencesReques
 import bzh.stack.apiavtrans.dto.vehicule.UserLastKilometrageDTO;
 import bzh.stack.apiavtrans.entity.User;
 import bzh.stack.apiavtrans.mapper.UserMapper;
+import bzh.stack.apiavtrans.service.UserMergeService;
 import bzh.stack.apiavtrans.service.UserService;
 import jakarta.servlet.http.HttpServletRequest;
 import io.swagger.v3.oas.annotations.Operation;
@@ -32,6 +33,7 @@ import java.util.stream.Collectors;
 public class UserController {
 
     private final UserService userService;
+    private final UserMergeService userMergeService;
     private final UserMapper userMapper;
 
     @Operation(
@@ -152,6 +154,88 @@ public class UserController {
         try {
             userService.deleteUser(uuid);
             return ResponseEntity.noContent().build();
+        } catch (RuntimeException e) {
+            return ResponseEntity.badRequest().body(new ErrorResponse(false, e.getMessage()));
+        }
+    }
+
+    @Operation(
+            summary = "[ADMINISTRATEUR] Aperçu de la fusion de deux profils",
+            description = """
+                    Ce que la fusion du profil `sourceUuid` dans le profil `{uuid}` (conservé) va faire, sans rien modifier :
+                    - **donnees** : nombre de pointages, absences, acomptes… du profil supprimé qui passeront au profil conservé ;
+                    - **avertissements** : pointages ou absences qui se chevauchent, couchettes en doublon (abandonnées), rôle différent ;
+                    - **blocages** : raisons qui empêchent la fusion (pointage en cours sur les deux profils, suppression de son propre compte).
+                    """
+    )
+    @ApiResponses(value = {
+            @ApiResponse(
+                    responseCode = "200",
+                    description = "Aperçu calculé",
+                    content = @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = UserMergePreviewResponse.class)
+                    )
+            ),
+            @ApiResponse(responseCode = "400", description = "Profil introuvable ou profils identiques",
+                    content = @Content(mediaType = "application/json", schema = @Schema(implementation = ErrorResponse.class)))
+    })
+    @RequireRole("Administrateur")
+    @GetMapping("/{uuid}/merge-preview")
+    public ResponseEntity<?> previewMerge(
+            @Parameter(description = "UUID du profil conservé", required = true) @PathVariable UUID uuid,
+            @Parameter(description = "UUID du profil à supprimer", required = true) @RequestParam UUID sourceUuid,
+            HttpServletRequest request) {
+        try {
+            User demandeur = (User) request.getAttribute("user");
+            UserMergePreviewDTO preview = userMergeService.previsualiser(uuid, sourceUuid, demandeur);
+            return ResponseEntity.ok(new UserMergePreviewResponse(true, "Aperçu de la fusion", preview));
+        } catch (RuntimeException e) {
+            return ResponseEntity.badRequest().body(new ErrorResponse(false, e.getMessage()));
+        }
+    }
+
+    @Operation(
+            summary = "[ADMINISTRATEUR] Fusionner deux profils",
+            description = """
+                    Transfère toutes les données du profil `sourceUuid` (pointages et pauses, absences et leurs commentaires,
+                    acomptes, signatures, couchettes, rapports et relevés véhicule, entretiens, cartes, tâches, notifications,
+                    validations et modifications faites par lui) au profil `{uuid}`, puis **supprime définitivement** le profil source.
+                    Les informations du profil conservé (e-mail, mot de passe, rôle, contrat, coordonnées) ne changent pas.
+                    Une couchette du profil supprimé un jour où le profil conservé en a déjà une est abandonnée.
+                    Refusée tant qu'un blocage de l'aperçu subsiste. Irréversible.
+                    """
+    )
+    @ApiResponses(value = {
+            @ApiResponse(
+                    responseCode = "200",
+                    description = "Profils fusionnés : renvoie le profil conservé",
+                    content = @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = UserResponse.class)
+                    )
+            ),
+            @ApiResponse(responseCode = "400", description = "Profil introuvable, profils identiques ou fusion bloquée",
+                    content = @Content(mediaType = "application/json", schema = @Schema(implementation = ErrorResponse.class)))
+    })
+    @RequireRole("Administrateur")
+    @PostMapping("/{uuid}/merge")
+    public ResponseEntity<?> mergeUsers(
+            @Parameter(description = "UUID du profil conservé", required = true) @PathVariable UUID uuid,
+            @io.swagger.v3.oas.annotations.parameters.RequestBody(
+                    description = "Profil à supprimer",
+                    required = true,
+                    content = @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = MergeUsersRequest.class)
+                    )
+            )
+            @RequestBody MergeUsersRequest mergeRequest,
+            HttpServletRequest request) {
+        try {
+            User demandeur = (User) request.getAttribute("user");
+            User conserve = userMergeService.fusionner(uuid, mergeRequest.getSourceUuid(), demandeur);
+            return ResponseEntity.ok(new UserResponse(true, "Profils fusionnés avec succès", userMapper.toDTO(conserve)));
         } catch (RuntimeException e) {
             return ResponseEntity.badRequest().body(new ErrorResponse(false, e.getMessage()));
         }
