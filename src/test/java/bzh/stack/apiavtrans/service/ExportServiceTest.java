@@ -176,6 +176,29 @@ class ExportServiceTest {
         assertThat(findRow(sheet, "TOTAL DU MOIS").getCell(6).getNumericCellValue()).isEqualTo(156.57);
     }
 
+    @Test
+    void should_create_one_sheet_per_user_when_two_users_share_the_same_name() throws Exception {
+        User homonyme = new User();
+        homonyme.setUuid(UUID.randomUUID());
+        homonyme.setFirstName("Jean");
+        homonyme.setLastName("Dupont");
+        LocalDate start = LocalDate.of(2026, 10, 1);
+        LocalDate end = LocalDate.of(2026, 10, 31);
+        List<UUID> uuids = List.of(employe.getUuid(), homonyme.getUuid());
+        when(userRepository.findAllById(uuids)).thenReturn(List.of(employe, homonyme));
+        when(serviceRepository.findServicesTravail(any(), any(), any())).thenReturn(List.of());
+        when(absenceRepository.findApprovedByUserAndDateRange(any(), any(), any())).thenReturn(List.of());
+        when(signatureRepository.findByUserAndDateBetweenOrderByDateDesc(any(), any(), any())).thenReturn(List.of());
+
+        byte[] bytes = exportService.exportWorkedHoursToExcel(uuids, start, end);
+
+        try (XSSFWorkbook workbook = new XSSFWorkbook(new ByteArrayInputStream(bytes))) {
+            assertThat(workbook.getNumberOfSheets()).isEqualTo(2);
+            assertThat(workbook.getSheetName(0)).isEqualTo("Jean_Dupont");
+            assertThat(workbook.getSheetName(1)).isEqualTo("Jean_Dupont (2)");
+        }
+    }
+
     private Sheet exporter(List<Service> travaux, List<Service> pauses) throws Exception {
         LocalDate start = LocalDate.of(2026, 10, 1);
         LocalDate end = LocalDate.of(2026, 10, 31);

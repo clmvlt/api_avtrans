@@ -10,6 +10,7 @@ import bzh.stack.apiavtrans.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.apache.poi.ss.usermodel.*;
 import org.apache.poi.ss.util.CellRangeAddress;
+import org.apache.poi.ss.util.WorkbookUtil;
 import org.apache.poi.xssf.usermodel.XSSFCellStyle;
 import org.apache.poi.xssf.usermodel.XSSFColor;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
@@ -61,11 +62,14 @@ public class ExportService {
 
     @Transactional(readOnly = true)
     public byte[] exportWorkedHoursToExcel(List<UUID> userUuids, LocalDate startDate, LocalDate endDate) throws IOException {
-        List<User> users = userRepository.findAllById(userUuids);
+        List<User> users = new ArrayList<>(userRepository.findAllById(userUuids));
 
         if (users.isEmpty()) {
             throw new RuntimeException("Aucun utilisateur trouvé");
         }
+        // Onglets dans l'ordre alphabétique (findAllById ne garantit aucun ordre)
+        users.sort(Comparator.comparing((User u) -> nullToEmpty(u.getLastName()), String.CASE_INSENSITIVE_ORDER)
+                .thenComparing(u -> nullToEmpty(u.getFirstName()), String.CASE_INSENSITIVE_ORDER));
 
         XSSFWorkbook workbook = new XSSFWorkbook();
         // Cache de styles partagé sur tout le classeur (couleurs de type d'absence, conflits, wrap)
@@ -115,7 +119,7 @@ public class ExportService {
 
     private void createUserSheet(Workbook workbook, User user, LocalDate startDate, LocalDate endDate,
                                  Map<String, CellStyle> styleCache) {
-        String sheetName = sanitizeSheetName(user.getFirstName() + "_" + user.getLastName());
+        String sheetName = uniqueSheetName(workbook, user.getFirstName() + "_" + user.getLastName());
         Sheet sheet = workbook.createSheet(sheetName);
 
         // ── Styles ──
@@ -1257,12 +1261,22 @@ public class ExportService {
 
     // ── Utilitaires ──
 
-    private String sanitizeSheetName(String name) {
-        String sanitized = name.replaceAll("[\\\\/:*?\\[\\]]+", "_");
-        if (sanitized.length() > 31) {
-            sanitized = sanitized.substring(0, 31);
+    /**
+     * Nom d'onglet valide pour Excel (31 caractères, sans caractère interdit) et unique dans le classeur :
+     * deux homonymes donnent « Jean_Dupont » et « Jean_Dupont (2) ».
+     */
+    private String uniqueSheetName(Workbook workbook, String name) {
+        String base = WorkbookUtil.createSafeSheetName(name, '_');
+        String candidate = base;
+        for (int i = 2; workbook.getSheet(candidate) != null; i++) {
+            String suffix = " (" + i + ")";
+            candidate = base.substring(0, Math.min(base.length(), 31 - suffix.length())) + suffix;
         }
-        return sanitized;
+        return candidate;
+    }
+
+    private static String nullToEmpty(String value) {
+        return value == null ? "" : value;
     }
 
     private String sanitizeFileNamePart(String name) {
