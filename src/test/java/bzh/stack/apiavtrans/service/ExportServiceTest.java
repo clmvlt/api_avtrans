@@ -200,6 +200,32 @@ class ExportServiceTest {
     }
 
     @Test
+    void should_export_every_user_when_names_collide_ignoring_case_or_after_truncation() throws Exception {
+        // « Tout sélectionner » : casse différente, noms longs au même début, noms absents, caractères interdits
+        List<User> users = List.of(employe,
+                utilisateur("jean", "DUPONT"),
+                utilisateur("Marie-Christine-Alexandra", "De La Fontaine-Durand"),
+                utilisateur("Marie-Christine-Alexandra", "De La Fontaine-Dupuis"),
+                utilisateur(null, null),
+                utilisateur(null, null),
+                utilisateur("'Léa", "Martin/Petit [ext]"));
+        List<UUID> uuids = users.stream().map(User::getUuid).toList();
+        when(userRepository.findAllById(uuids)).thenReturn(users);
+        when(serviceRepository.findServicesTravail(any(), any(), any())).thenReturn(List.of());
+        when(absenceRepository.findApprovedByUserAndDateRange(any(), any(), any())).thenReturn(List.of());
+        when(signatureRepository.findByUserAndDateBetweenOrderByDateDesc(any(), any(), any())).thenReturn(List.of());
+
+        byte[] bytes = exportService.exportWorkedHoursToExcel(uuids, LocalDate.of(2026, 10, 1), LocalDate.of(2026, 10, 31));
+
+        try (XSSFWorkbook workbook = new XSSFWorkbook(new ByteArrayInputStream(bytes))) {
+            assertThat(workbook.getNumberOfSheets()).isEqualTo(users.size());
+            for (int i = 0; i < workbook.getNumberOfSheets(); i++) {
+                assertThat(workbook.getSheetName(i)).hasSizeLessThanOrEqualTo(31);
+            }
+        }
+    }
+
+    @Test
     void should_not_flag_conflict_when_user_works_the_other_half_of_a_half_day_absence() throws Exception {
         Service apresMidi = travail(at(12, 13, 0), at(12, 17, 0));
         Service jourEntier = travail(at(13, 8, 0), at(13, 12, 0));
@@ -241,6 +267,14 @@ class ExportServiceTest {
         service.setFin(fin);
         service.setIsBreak(false);
         return service;
+    }
+
+    private static User utilisateur(String prenom, String nom) {
+        User user = new User();
+        user.setUuid(UUID.randomUUID());
+        user.setFirstName(prenom);
+        user.setLastName(nom);
+        return user;
     }
 
     private Absence absence(int jourOctobre, Absence.AbsencePeriod periode) {
